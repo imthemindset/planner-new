@@ -29,6 +29,14 @@
 </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+    <form>
+  <input name="nome" placeholder="Nome" required>
+  <input name="valor" placeholder="Valor" required>
+  <button type="submit">Salvar</button>
+</form>
+
+<div id="dados"></div>
+
     <!-- Login Screen -->
     <div id="login-screen" class="min-h-screen bg-gradient-to-br from-blue-600 via-indigo-700 to-purple-800 flex items-center justify-center p-4">
         <div class="w-full max-w-md">
@@ -698,5 +706,53 @@ document.getElementById('login-form').addEventListener('submit', (e) => {
             updateUI();
         }
     </script>
+<!-- Importa as bibliotecas do Firebase -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getFirestore, collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+  // 🔹 Seu código de configuração do Firebase (substitua com o seu)
+  const firebaseConfig = {
+  apiKey: "AIzaSyCdLPPg0DNm99j5sL02QGONqa_LQZ4Ns7M",
+  authDomain: "financial-planner-e90e2.firebaseapp.com",
+  projectId: "financial-planner-e90e2",
+  storageBucket: "financial-planner-e90e2.firebasestorage.app",
+  messagingSenderId: "313457678965",
+  appId: "1:313457678965:web:3d2059b93cc7cabf59f63c"
+};
+
+  // 🔹 Inicializa o Firebase
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  // 🔹 Exemplo simples de formulário
+  const form = document.querySelector("form");
+  const dadosDiv = document.querySelector("#dados");
+
+  // Salvar os dados no Firestore
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData.entries());
+
+    await addDoc(collection(db, "registros"), data);
+    alert("Dados salvos no Firebase!");
+    form.reset();
+    carregarDados();
+  });
+
+  // Carregar os dados do Firestore
+  async function carregarDados() {
+    dadosDiv.innerHTML = "";
+    const querySnapshot = await getDocs(collection(db, "registros"));
+    querySnapshot.forEach((doc) => {
+      const item = doc.data();
+      dadosDiv.innerHTML += `<p>${item.nome || ""} - ${item.valor || ""}</p>`;
+    });
+  }
+
+  carregarDados();
+</script>    
 </body>
+
 </html>
