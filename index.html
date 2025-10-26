@@ -30,18 +30,13 @@
 </head>
 <body class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
     <!-- 🔹 FORMULÁRIO PARA LANÇAR DADOS -->
-  <form id="planner-form">
-    <label>Nome do gasto:</label>
-    <input name="nome" placeholder="Ex: Mercado" required>
+  <form>
+  <input name="nome" placeholder="Nome" required>
+  <input name="valor" placeholder="Valor" required>
+  <button type="submit">Salvar</button>
+</form>
 
-    <label>Valor:</label>
-    <input name="valor" placeholder="Ex: 250" required>
-
-    <button type="submit">💾 Salvar</button>
-  </form>
-
-  <!-- 🔹 ÁREA QUE MOSTRA OS DADOS SALVOS -->
-  <div id="dados"></div>
+<div id="dados"></div>
 
     <!-- Login Screen -->
     <div id="login-screen" class="min-h-screen bg-gradient-to-br from-blue-600 via-indigo-700 to-purple-800 flex items-center justify-center p-4">
@@ -762,4 +757,5 @@ document.getElementById('login-form').addEventListener('submit', (e) => {
 </body>
 
 </html>
+
 
