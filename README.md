@@ -1,2 +1,0 @@
-# planner-new
-planejador financeiro
