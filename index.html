@@ -11,50 +11,23 @@
     <!-- Font Awesome CDN for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <style>
-    /* Additional custom styles */
-    .hidden { display: none; }
-    .chart-container {
-        width: 100%;
-        max-width: 600px; /* Limita a largura máxima para evitar gráficos muito largos */
-        height: 350px; /* Altura fixa para consistência */
-        max-height: 400px; /* Altura máxima para telas grandes */
-        position: relative; /* Garante que o canvas respeite o contêiner */
-        margin: 0 auto; /* Centraliza o gráfico horizontalmente */
-        overflow: hidden; /* Evita que o conteúdo do gráfico ultrapasse o contêiner */
-    }
-    .chart-container canvas {
-        width: 100% !important; /* Força o canvas a ocupar toda a largura do contêiner */
-        height: 100% !important; /* Força o canvas a ocupar toda a altura do contêiner */
-    }
-</style>
-    <script type="module">
-  // Importa funções do Firebase
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.4.0/firebase-app.js";
-  import { getDatabase, ref, set, push, onValue } from "https://www.gstatic.com/firebasejs/10.4.0/firebase-database.js";
-
-  const firebaseConfig = {
-  apiKey: "AIzaSyCdLPPg0DNm99j5sL02QGONqa_LQZ4Ns7M",
-  authDomain: "financial-planner-e90e2.firebaseapp.com",
-  projectId: "financial-planner-e90e2",
-  storageBucket: "financial-planner-e90e2.firebasestorage.app",
-  messagingSenderId: "313457678965",
-  appId: "1:313457678965:web:3d2059b93cc7cabf59f63c"
-};
-
-  const app = initializeApp(firebaseConfig);
-  const database = getDatabase(app);
-</script>
-
+        .hidden { display: none; }
+        .chart-container {
+            width: 100%;
+            max-width: 600px;
+            height: 350px;
+            max-height: 400px;
+            position: relative;
+            margin: 0 auto;
+            overflow: hidden;
+        }
+        .chart-container canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+    </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-    <!-- 🔹 FORMULÁRIO PARA LANÇAR DADOS -->
-  <form>
-  <input name="nome" placeholder="Nome" required>
-  <input name="valor" placeholder="Valor" required>
-  <button type="submit">Salvar</button>
-</form>
-
-<div id="dados"></div>
 
     <!-- Login Screen -->
     <div id="login-screen" class="min-h-screen bg-gradient-to-br from-blue-600 via-indigo-700 to-purple-800 flex items-center justify-center p-4">
@@ -106,7 +79,7 @@
             <div class="flex items-center gap-4">
                 <div class="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow">
                     <i class="fas fa-user text-xl text-indigo-600"></i>
-                    <span class="font-semibold text-gray-700">Netozael</span>
+                    <span id="user-name" class="font-semibold text-gray-700">Usuário</span>
                 </div>
                 <select id="year-select" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white shadow">
                     <option value="2025">2025</option>
@@ -200,7 +173,6 @@
                     <div>
                         <label class="block text-sm font-semibold text-gray-700 mb-2">Categoria</label>
                         <select id="new-transaction-category" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
-                            <!-- Populated by JavaScript -->
                         </select>
                     </div>
                     <div>
@@ -361,83 +333,108 @@
         </div>
     </div>
 
-    <script>
-        // Data Management
+    <!-- Firebase Scripts -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+        import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyCdLPPg0DNm99j5sL02QGONqa_LQZ4Ns7M",
+            authDomain: "financial-planner-e90e2.firebaseapp.com",
+            projectId: "financial-planner-e90e2",
+            storageBucket: "financial-planner-e90e2.firebasestorage.app",
+            messagingSenderId: "313457678965",
+            appId: "1:313457678965:web:3d2059b93cc7cabf59f63c"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // Global Variables
         const categories = {
             expense: ['Moradia', 'Alimentação', 'Transporte', 'Saúde', 'Lazer', 'Educação', 'Outros'],
             income: ['Salário', 'Freelance', 'Investimentos', 'Outros']
         };
 
-        function loadSavedData(key, defaultValue) {
-            try {
-                const saved = localStorage.getItem(key);
-                return saved ? JSON.parse(saved) : defaultValue;
-            } catch {
-                return defaultValue;
-            }
-        }
-
-        let transactions = loadSavedData('transactions', [
-            { id: 1, date: '2025-01-05', type: 'expense', category: 'Moradia', amount: 1200, description: 'Aluguel Janeiro' },
-            { id: 2, date: '2025-01-10', type: 'income', category: 'Salário', amount: 5000, description: 'Salário mensal' },
-            { id: 3, date: '2025-01-15', type: 'expense', category: 'Alimentação', amount: 350, description: 'Supermercado' },
-            { id: 4, date: '2025-02-05', type: 'expense', category: 'Moradia', amount: 1200, description: 'Aluguel Fevereiro' },
-            { id: 5, date: '2025-02-10', type: 'income', category: 'Salário', amount: 5000, description: 'Salário mensal' }
-        ]);
-
-        let goals = loadSavedData('goals', [
-            { id: 1, name: 'Fundo de Emergência', target: 20000, current: 8500, deadline: '2025-12-31' },
-            { id: 2, name: 'Viagem', target: 5000, current: 2300, deadline: '2025-07-31' }
-        ]);
-
-        let isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
+        let transactions = [];
+        let goals = [];
+        let currentUser = null;
         let selectedYear = 2025;
         let filters = { year: '', month: '', category: '', type: '', search: '' };
+        let cashflowChart, monthlyChart, categoryChart;
 
-        // Login Handling
-document.getElementById('login-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const email = document.getElementById('login-email').value.trim().toLowerCase();
-    const password = document.getElementById('login-password').value.trim();
-    const errorDiv = document.getElementById('login-error');
-    const errorSpan = errorDiv.querySelector('span');
-
-    if (!email || !password) {
-        errorDiv.classList.remove('hidden');
-        errorSpan.textContent = 'Por favor, preencha todos os campos';
-        return;
-    }
-
-    // Credenciais codificadas em Base64 (NÃO SEGURAS, apenas para ofuscação)
-    const validEmail = atob('bmV0b3phZWxAZ21haWwuY29t'); // 'netozael@gmail.com' em Base64
-    const validPassword = atob('bmV0bzEyMzc0'); // 'neto12374' em Base64
-
-    if (email === validEmail && password === validPassword) {
-        isLoggedIn = true;
-        localStorage.setItem('isLoggedIn', 'true');
-        document.getElementById('login-screen').classList.add('hidden');
-        document.getElementById('dashboard').classList.remove('hidden');
-        updateUI();
-    } else {
-        errorDiv.classList.remove('hidden');
-        errorSpan.textContent = 'Email ou senha incorretos. Acesso negado.';
-    }
-});
-
-        document.getElementById('logout-btn').addEventListener('click', () => {
-            isLoggedIn = false;
-            localStorage.setItem('isLoggedIn', 'false');
-            document.getElementById('login-screen').classList.remove('hidden');
-            document.getElementById('dashboard').classList.add('hidden');
-            document.getElementById('login-form').reset();
-            document.getElementById('login-error').classList.add('hidden');
+        // Authentication Listener
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                currentUser = user;
+                document.getElementById('user-name').textContent = user.email.split('@')[0];
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('dashboard').classList.remove('hidden');
+                await loadUserData();
+                updateUI();
+            } else {
+                currentUser = null;
+                document.getElementById('login-screen').classList.remove('hidden');
+                document.getElementById('dashboard').classList.add('hidden');
+            }
         });
+
+        // Login Handler
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('login-email').value.trim();
+            const password = document.getElementById('login-password').value.trim();
+            const errorDiv = document.getElementById('login-error');
+            const errorSpan = errorDiv.querySelector('span');
+
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+                document.getElementById('login-form').reset();
+                errorDiv.classList.add('hidden');
+            } catch (error) {
+                errorDiv.classList.remove('hidden');
+                if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+                    errorSpan.textContent = 'Email ou senha incorretos. Acesso negado.';
+                } else {
+                    errorSpan.textContent = 'Erro ao fazer login. Tente novamente.';
+                }
+            }
+        });
+
+        // Logout Handler
+        document.getElementById('logout-btn').addEventListener('click', async () => {
+            await signOut(auth);
+            transactions = [];
+            goals = [];
+        });
+
+        // Load User Data from Firestore
+        async function loadUserData() {
+            if (!currentUser) return;
+
+            // Load Transactions
+            const transactionsQuery = query(collection(db, 'transactions'), where('userId', '==', currentUser.uid));
+            const transactionsSnapshot = await getDocs(transactionsQuery);
+            transactions = transactionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            // Load Goals
+            const goalsQuery = query(collection(db, 'goals'), where('userId', '==', currentUser.uid));
+            const goalsSnapshot = await getDocs(goalsQuery);
+            goals = goalsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            updateYears();
+        }
 
         // Tab Navigation
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('bg-indigo-600', 'text-white', 'shadow-lg'));
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.add('bg-white', 'text-gray-700', 'hover:bg-gray-50'));
+                document.querySelectorAll('.tab-btn').forEach(b => {
+                    b.classList.remove('bg-indigo-600', 'text-white', 'shadow-lg');
+                    b.classList.add('bg-white', 'text-gray-700', 'hover:bg-gray-50');
+                });
                 btn.classList.remove('bg-white', 'text-gray-700', 'hover:bg-gray-50');
                 btn.classList.add('bg-indigo-600', 'text-white', 'shadow-lg');
                 document.querySelectorAll('.tab-content').forEach(content => content.classList.add('hidden'));
@@ -446,7 +443,7 @@ document.getElementById('login-form').addEventListener('submit', (e) => {
             });
         });
 
-        // Populate Categories and Years
+        // Update Categories
         function updateCategories() {
             const typeSelect = document.getElementById('new-transaction-type');
             const categorySelect = document.getElementById('new-transaction-category');
@@ -458,66 +455,129 @@ document.getElementById('login-form').addEventListener('submit', (e) => {
         document.getElementById('new-transaction-type').addEventListener('change', updateCategories);
         updateCategories();
 
-        const yearSelect = document.getElementById('year-select');
-        const filterYearSelect = document.getElementById('filter-year');
+        // Update Years
         function updateYears() {
             const years = [...new Set(transactions.map(t => new Date(t.date).getFullYear()))];
             const allYears = [2025, 2026, 2027, 2028, 2029, 2030];
             years.forEach(year => { if (!allYears.includes(year)) allYears.push(year); });
             allYears.sort();
+            
+            const yearSelect = document.getElementById('year-select');
+            const filterYearSelect = document.getElementById('filter-year');
             yearSelect.innerHTML = allYears.map(year => `<option value="${year}">${year}</option>`).join('');
             filterYearSelect.innerHTML = '<option value="">Todos</option>' + allYears.map(year => `<option value="${year}">${year}</option>`).join('');
             yearSelect.value = selectedYear;
         }
-        yearSelect.addEventListener('change', () => {
-            selectedYear = parseInt(yearSelect.value);
+
+        document.getElementById('year-select').addEventListener('change', () => {
+            selectedYear = parseInt(document.getElementById('year-select').value);
             updateUI();
         });
-        updateYears();
 
         // Add Transaction
-        document.getElementById('add-transaction-btn').addEventListener('click', () => {
+        document.getElementById('add-transaction-btn').addEventListener('click', async () => {
+            if (!currentUser) return;
+            
             const transaction = {
-                id: Date.now(),
+                userId: currentUser.uid,
                 date: document.getElementById('new-transaction-date').value,
                 type: document.getElementById('new-transaction-type').value,
                 category: document.getElementById('new-transaction-category').value,
                 amount: parseFloat(document.getElementById('new-transaction-amount').value),
                 description: document.getElementById('new-transaction-description').value
             };
+
             if (transaction.date && transaction.amount && transaction.description) {
-                transactions.push(transaction);
-                localStorage.setItem('transactions', JSON.stringify(transactions));
-                document.getElementById('new-transaction-date').value = '';
-                document.getElementById('new-transaction-type').value = 'expense';
-                document.getElementById('new-transaction-category').value = 'Moradia';
-                document.getElementById('new-transaction-amount').value = '';
-                document.getElementById('new-transaction-description').value = '';
-                updateCategories();
-                updateYears();
-                updateUI();
+                try {
+                    const docRef = await addDoc(collection(db, 'transactions'), transaction);
+                    transactions.push({ id: docRef.id, ...transaction });
+                    
+                    document.getElementById('new-transaction-date').value = '';
+                    document.getElementById('new-transaction-type').value = 'expense';
+                    document.getElementById('new-transaction-amount').value = '';
+                    document.getElementById('new-transaction-description').value = '';
+                    updateCategories();
+                    updateYears();
+                    updateUI();
+                } catch (error) {
+                    console.error('Erro ao adicionar transação:', error);
+                    alert('Erro ao adicionar lançamento. Tente novamente.');
+                }
             }
         });
 
         // Add Goal
-        document.getElementById('add-goal-btn').addEventListener('click', () => {
+        document.getElementById('add-goal-btn').addEventListener('click', async () => {
+            if (!currentUser) return;
+            
             const goal = {
-                id: Date.now(),
+                userId: currentUser.uid,
                 name: document.getElementById('new-goal-name').value,
                 target: parseFloat(document.getElementById('new-goal-target').value),
                 current: parseFloat(document.getElementById('new-goal-current').value),
                 deadline: document.getElementById('new-goal-deadline').value
             };
+
             if (goal.name && goal.target && goal.current !== '' && goal.deadline) {
-                goals.push(goal);
-                localStorage.setItem('goals', JSON.stringify(goals));
-                document.getElementById('new-goal-name').value = '';
-                document.getElementById('new-goal-target').value = '';
-                document.getElementById('new-goal-current').value = '';
-                document.getElementById('new-goal-deadline').value = '';
-                updateUI();
+                try {
+                    const docRef = await addDoc(collection(db, 'goals'), goal);
+                    goals.push({ id: docRef.id, ...goal });
+                    
+                    document.getElementById('new-goal-name').value = '';
+                    document.getElementById('new-goal-target').value = '';
+                    document.getElementById('new-goal-current').value = '';
+                    document.getElementById('new-goal-deadline').value = '';
+                    updateUI();
+                } catch (error) {
+                    console.error('Erro ao adicionar objetivo:', error);
+                    alert('Erro ao adicionar objetivo. Tente novamente.');
+                }
             }
         });
+
+        // Delete Transaction
+        window.deleteTransaction = async (id) => {
+            if (!currentUser) return;
+            
+            try {
+                await deleteDoc(doc(db, 'transactions', id));
+                transactions = transactions.filter(t => t.id !== id);
+                updateYears();
+                updateUI();
+            } catch (error) {
+                console.error('Erro ao deletar transação:', error);
+                alert('Erro ao deletar lançamento. Tente novamente.');
+            }
+        };
+
+        // Delete Goal
+        window.deleteGoal = async (id) => {
+            if (!currentUser) return;
+            
+            try {
+                await deleteDoc(doc(db, 'goals', id));
+                goals = goals.filter(g => g.id !== id);
+                updateUI();
+            } catch (error) {
+                console.error('Erro ao deletar objetivo:', error);
+                alert('Erro ao deletar objetivo. Tente novamente.');
+            }
+        };
+
+        // Update Goal Progress
+        window.updateGoalProgress = async (id, value) => {
+            if (!currentUser) return;
+            
+            const newValue = parseFloat(value) || 0;
+            try {
+                await updateDoc(doc(db, 'goals', id), { current: newValue });
+                goals = goals.map(g => g.id === id ? { ...g, current: newValue } : g);
+                updateUI();
+            } catch (error) {
+                console.error('Erro ao atualizar objetivo:', error);
+                alert('Erro ao atualizar objetivo. Tente novamente.');
+            }
+        };
 
         // Filter Transactions
         function getFilteredTransactions() {
@@ -540,8 +600,7 @@ document.getElementById('login-form').addEventListener('submit', (e) => {
         document.getElementById('filter-category').addEventListener('change', (e) => { filters.category = e.target.value; updateUI(); });
         document.getElementById('filter-search').addEventListener('input', (e) => { filters.search = e.target.value; updateUI(); });
 
-        // Charts
-        let cashflowChart, monthlyChart, categoryChart;
+        // Update Charts
         function updateCharts() {
             const monthlyData = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'].map((month, index) => {
                 const monthTransactions = transactions.filter(t => {
@@ -622,11 +681,7 @@ document.getElementById('login-form').addEventListener('submit', (e) => {
 
         // Update UI
         function updateUI() {
-            if (!isLoggedIn) {
-                document.getElementById('login-screen').classList.remove('hidden');
-                document.getElementById('dashboard').classList.add('hidden');
-                return;
-            }
+            if (!currentUser) return;
 
             const yearTransactions = transactions.filter(t => new Date(t.date).getFullYear() === selectedYear);
             const totalIncome = yearTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
@@ -658,7 +713,7 @@ document.getElementById('login-form').addEventListener('submit', (e) => {
                         ${t.type === 'income' ? '+' : '-'} R$ ${t.amount.toLocaleString('pt-BR')}
                     </td>
                     <td class="px-4 py-3 text-center">
-                        <button onclick="deleteTransaction(${t.id})" class="text-red-600 hover:text-red-800"><i class="fas fa-trash-alt"></i></button>
+                        <button onclick="deleteTransaction('${t.id}')" class="text-red-600 hover:text-red-800"><i class="fas fa-trash-alt"></i></button>
                     </td>
                 </tr>
             `).join('');
@@ -675,7 +730,7 @@ document.getElementById('login-form').addEventListener('submit', (e) => {
                             </div>
                             <div class="flex items-center gap-2">
                                 <span class="px-3 py-1 bg-indigo-600 text-white rounded-full text-sm font-semibold">${Math.round(progress)}%</span>
-                                <button onclick="deleteGoal(${goal.id})" class="text-red-600 hover:text-red-800"><i class="fas fa-trash-alt"></i></button>
+                                <button onclick="deleteGoal('${goal.id}')" class="text-red-600 hover:text-red-800"><i class="fas fa-trash-alt"></i></button>
                             </div>
                         </div>
                         <div class="mb-3">
@@ -689,7 +744,7 @@ document.getElementById('login-form').addEventListener('submit', (e) => {
                         </div>
                         <div class="flex gap-2">
                             <input type="number" step="0.01" value="${goal.current}" class="goal-progress flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="Atualizar progresso">
-                            <button onclick="updateGoalProgress(${goal.id}, this.previousElementSibling.value)" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-semibold">Atualizar</button>
+                            <button onclick="updateGoalProgress('${goal.id}', this.previousElementSibling.value)" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-semibold">Atualizar</button>
                         </div>
                     </div>
                 `;
@@ -699,85 +754,9 @@ document.getElementById('login-form').addEventListener('submit', (e) => {
             updateCharts();
         }
 
-        function deleteTransaction(id) {
-            transactions = transactions.filter(t => t.id !== id);
-            localStorage.setItem('transactions', JSON.stringify(transactions));
-            updateYears();
-            updateUI();
-        }
-
-        function deleteGoal(id) {
-            goals = goals.filter(g => g.id !== id);
-            localStorage.setItem('goals', JSON.stringify(goals));
-            updateUI();
-        }
-
-        function updateGoalProgress(id, value) {
-            goals = goals.map(g => g.id === id ? { ...g, current: parseFloat(value) || 0 } : g);
-            localStorage.setItem('goals', JSON.stringify(goals));
-            updateUI();
-        }
-
-        // Initial Render
-        if (isLoggedIn) {
-            document.getElementById('login-screen').classList.add('hidden');
-            document.getElementById('dashboard').classList.remove('hidden');
-            updateUI();
-        }
+        // Initialize
+        updateYears();
     </script>
-<!-- Importa as bibliotecas do Firebase -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getFirestore, collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-
-  // 🔹 Seu código de configuração do Firebase (substitua com o seu)
-  const firebaseConfig = {
-  apiKey: "AIzaSyCdLPPg0DNm99j5sL02QGONqa_LQZ4Ns7M",
-  authDomain: "financial-planner-e90e2.firebaseapp.com",
-  projectId: "financial-planner-e90e2",
-  storageBucket: "financial-planner-e90e2.firebasestorage.app",
-  messagingSenderId: "313457678965",
-  appId: "1:313457678965:web:3d2059b93cc7cabf59f63c"
-};
-
-  // 🔹 Inicializa o Firebase
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
-
-  // 🔹 Exemplo simples de formulário
-  const form = document.querySelector("form");
-  const dadosDiv = document.querySelector("#dados");
-
-  // Salvar os dados no Firestore
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const formData = new FormData(form);
-    const data = Object.fromEntries(formData.entries());
-
-    await addDoc(collection(db, "registros"), data);
-    alert("Dados salvos no Firebase!");
-    form.reset();
-    carregarDados();
-  });
-
-  // Carregar os dados do Firestore
-  async function carregarDados() {
-    dadosDiv.innerHTML = "";
-    const querySnapshot = await getDocs(collection(db, "registros"));
-    querySnapshot.forEach((doc) => {
-      const item = doc.data();
-      dadosDiv.innerHTML += `<p>${item.nome || ""} - ${item.valor || ""}</p>`;
-    });
-  }
-
-  carregarDados();
-</script>   
-<script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-database.js"></script>
 
 </body>
-
 </html>
-
-
-
