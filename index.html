@@ -414,26 +414,39 @@
             const errorDiv = document.getElementById('login-error');
             const errorSpan = errorDiv.querySelector('span');
 
+            // Mostra que está processando
+            errorDiv.classList.remove('hidden');
+            errorDiv.className = 'mb-4 p-3 bg-blue-50 border-l-4 border-blue-500 rounded-lg text-blue-700 text-sm flex items-center gap-2';
+            errorSpan.textContent = 'Conectando...';
+
             try {
                 await signInWithEmailAndPassword(auth, email, password);
                 document.getElementById('login-form').reset();
                 errorDiv.classList.add('hidden');
             } catch (error) {
-                console.error('Erro de login:', error.code);
+                console.error('Erro completo de login:', error);
+                errorDiv.className = 'mb-4 p-3 bg-red-50 border-l-4 border-red-500 rounded-lg text-red-700 text-sm flex items-center gap-2';
                 errorDiv.classList.remove('hidden');
                 
                 // Se o usuário não existe, tenta criar
                 if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
+                    errorSpan.textContent = 'Criando sua conta...';
                     try {
                         await createUserWithEmailAndPassword(auth, email, password);
                         errorDiv.classList.add('hidden');
+                        console.log('Usuário criado com sucesso!');
                     } catch (createError) {
-                        errorSpan.textContent = 'Email ou senha incorretos. Acesso negado.';
+                        console.error('Erro ao criar usuário:', createError);
+                        errorSpan.textContent = `Erro: ${createError.message}`;
                     }
                 } else if (error.code === 'auth/wrong-password') {
-                    errorSpan.textContent = 'Email ou senha incorretos. Acesso negado.';
+                    errorSpan.textContent = 'Senha incorreta. Tente novamente.';
+                } else if (error.code === 'auth/network-request-failed') {
+                    errorSpan.textContent = 'Sem conexão com internet. Verifique sua rede.';
+                } else if (error.code === 'auth/too-many-requests') {
+                    errorSpan.textContent = 'Muitas tentativas. Aguarde alguns minutos.';
                 } else {
-                    errorSpan.textContent = 'Erro ao fazer login. Tente novamente.';
+                    errorSpan.textContent = `Erro: ${error.code} - ${error.message}`;
                 }
             }
         });
