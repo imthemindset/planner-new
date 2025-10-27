@@ -336,7 +336,7 @@
     <!-- Firebase Scripts -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-        import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
         // Firebase Configuration
@@ -365,6 +365,30 @@
         let selectedYear = 2025;
         let filters = { year: '', month: '', category: '', type: '', search: '' };
         let cashflowChart, monthlyChart, categoryChart;
+
+        // Auto-create default user if not exists
+        async function ensureDefaultUserExists() {
+            const defaultEmail = 'netozael@gmail.com';
+            const defaultPassword = 'neto12374';
+            
+            try {
+                // Tenta fazer login para verificar se o usuário existe
+                await signInWithEmailAndPassword(auth, defaultEmail, defaultPassword);
+            } catch (error) {
+                if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
+                    // Se não existir, cria o usuário
+                    try {
+                        await createUserWithEmailAndPassword(auth, defaultEmail, defaultPassword);
+                        console.log('Usuário padrão criado com sucesso!');
+                    } catch (createError) {
+                        console.error('Erro ao criar usuário:', createError);
+                    }
+                }
+            }
+        }
+
+        // Chama a função ao carregar a página
+        ensureDefaultUserExists();
 
         // Authentication Listener
         onAuthStateChanged(auth, async (user) => {
@@ -395,8 +419,18 @@
                 document.getElementById('login-form').reset();
                 errorDiv.classList.add('hidden');
             } catch (error) {
+                console.error('Erro de login:', error.code);
                 errorDiv.classList.remove('hidden');
-                if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+                
+                // Se o usuário não existe, tenta criar
+                if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
+                    try {
+                        await createUserWithEmailAndPassword(auth, email, password);
+                        errorDiv.classList.add('hidden');
+                    } catch (createError) {
+                        errorSpan.textContent = 'Email ou senha incorretos. Acesso negado.';
+                    }
+                } else if (error.code === 'auth/wrong-password') {
                     errorSpan.textContent = 'Email ou senha incorretos. Acesso negado.';
                 } else {
                     errorSpan.textContent = 'Erro ao fazer login. Tente novamente.';
