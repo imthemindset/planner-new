@@ -336,7 +336,7 @@
     <!-- Firebase Scripts -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+        import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
         // Firebase Configuration
@@ -365,30 +365,6 @@
         let selectedYear = 2025;
         let filters = { year: '', month: '', category: '', type: '', search: '' };
         let cashflowChart, monthlyChart, categoryChart;
-
-        // Auto-create default user if not exists
-        async function ensureDefaultUserExists() {
-            const defaultEmail = 'netozael@gmail.com';
-            const defaultPassword = 'neto12374';
-            
-            try {
-                // Tenta fazer login para verificar se o usuário existe
-                await signInWithEmailAndPassword(auth, defaultEmail, defaultPassword);
-            } catch (error) {
-                if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
-                    // Se não existir, cria o usuário
-                    try {
-                        await createUserWithEmailAndPassword(auth, defaultEmail, defaultPassword);
-                        console.log('Usuário padrão criado com sucesso!');
-                    } catch (createError) {
-                        console.error('Erro ao criar usuário:', createError);
-                    }
-                }
-            }
-        }
-
-        // Chama a função ao carregar a página
-        ensureDefaultUserExists();
 
         // Authentication Listener
         onAuthStateChanged(auth, async (user) => {
@@ -428,25 +404,14 @@
                 errorDiv.className = 'mb-4 p-3 bg-red-50 border-l-4 border-red-500 rounded-lg text-red-700 text-sm flex items-center gap-2';
                 errorDiv.classList.remove('hidden');
                 
-                // Se o usuário não existe, tenta criar
-                if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
-                    errorSpan.textContent = 'Criando sua conta...';
-                    try {
-                        await createUserWithEmailAndPassword(auth, email, password);
-                        errorDiv.classList.add('hidden');
-                        console.log('Usuário criado com sucesso!');
-                    } catch (createError) {
-                        console.error('Erro ao criar usuário:', createError);
-                        errorSpan.textContent = `Erro: ${createError.message}`;
-                    }
-                } else if (error.code === 'auth/wrong-password') {
-                    errorSpan.textContent = 'Senha incorreta. Tente novamente.';
+                if (error.code === 'auth/wrong-password' || error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
+                    errorSpan.textContent = 'Email ou senha incorretos. Acesso negado.';
                 } else if (error.code === 'auth/network-request-failed') {
                     errorSpan.textContent = 'Sem conexão com internet. Verifique sua rede.';
                 } else if (error.code === 'auth/too-many-requests') {
                     errorSpan.textContent = 'Muitas tentativas. Aguarde alguns minutos.';
                 } else {
-                    errorSpan.textContent = `Erro: ${error.code} - ${error.message}`;
+                    errorSpan.textContent = 'Erro ao fazer login. Tente novamente.';
                 }
             }
         });
@@ -523,33 +488,53 @@
 
         // Add Transaction
         document.getElementById('add-transaction-btn').addEventListener('click', async () => {
-            if (!currentUser) return;
+            if (!currentUser) {
+                alert('Você precisa estar logado para adicionar transações.');
+                return;
+            }
             
+            const date = document.getElementById('new-transaction-date').value;
+            const type = document.getElementById('new-transaction-type').value;
+            const category = document.getElementById('new-transaction-category').value;
+            const amount = parseFloat(document.getElementById('new-transaction-amount').value);
+            const description = document.getElementById('new-transaction-description').value;
+
+            if (!date || !amount || !description) {
+                alert('Por favor, preencha todos os campos obrigatórios.');
+                return;
+            }
+
             const transaction = {
                 userId: currentUser.uid,
-                date: document.getElementById('new-transaction-date').value,
-                type: document.getElementById('new-transaction-type').value,
-                category: document.getElementById('new-transaction-category').value,
-                amount: parseFloat(document.getElementById('new-transaction-amount').value),
-                description: document.getElementById('new-transaction-description').value
+                date: date,
+                type: type,
+                category: category,
+                amount: amount,
+                description: description,
+                createdAt: new Date().toISOString()
             };
 
-            if (transaction.date && transaction.amount && transaction.description) {
-                try {
-                    const docRef = await addDoc(collection(db, 'transactions'), transaction);
-                    transactions.push({ id: docRef.id, ...transaction });
-                    
-                    document.getElementById('new-transaction-date').value = '';
-                    document.getElementById('new-transaction-type').value = 'expense';
-                    document.getElementById('new-transaction-amount').value = '';
-                    document.getElementById('new-transaction-description').value = '';
-                    updateCategories();
-                    updateYears();
-                    updateUI();
-                } catch (error) {
-                    console.error('Erro ao adicionar transação:', error);
-                    alert('Erro ao adicionar lançamento. Tente novamente.');
-                }
+            console.log('Tentando adicionar transação:', transaction);
+
+            try {
+                const docRef = await addDoc(collection(db, 'transactions'), transaction);
+                console.log('Transação adicionada com ID:', docRef.id);
+                transactions.push({ id: docRef.id, ...transaction });
+                
+                document.getElementById('new-transaction-date').value = '';
+                document.getElementById('new-transaction-type').value = 'expense';
+                document.getElementById('new-transaction-amount').value = '';
+                document.getElementById('new-transaction-description').value = '';
+                updateCategories();
+                updateYears();
+                updateUI();
+                
+                alert('Lançamento adicionado com sucesso!');
+            } catch (error) {
+                console.error('Erro detalhado ao adicionar transação:', error);
+                console.error('Código do erro:', error.code);
+                console.error('Mensagem:', error.message);
+                alert(`Erro ao adicionar lançamento: ${error.message}\n\nVerifique as regras do Firestore no console do Firebase.`);
             }
         });
 
