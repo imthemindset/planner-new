@@ -70,15 +70,15 @@
     </div>
 
     <!-- Dashboard -->
-    <div id="dashboard" class="hidden max-w-7xl mx-auto p-6">
-        <div class="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div id="dashboard" class="hidden max-w-7xl mx-auto px-3 py-4 md:p-6">
+        <div class="mb-6 flex flex-col gap-3">
             <div>
-                <h1 class="text-4xl font-bold text-gray-800 mb-2">Planejador Financeiro</h1>
-                <p class="text-gray-600">Gerencie suas finanças e alcance seus objetivos</p>
+                <h1 class="text-2xl md:text-4xl font-bold text-gray-800 mb-1">Planejador Financeiro</h1>
+                <p class="text-sm text-gray-600">Gerencie suas finanças e alcance seus objetivos</p>
             </div>
-            <div class="flex items-center gap-4">
-                <div class="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow">
-                    <i class="fas fa-user text-xl text-indigo-600"></i>
+            <div class="flex flex-wrap items-center gap-2">
+                <div class="flex items-center gap-2 px-3 py-2 bg-white rounded-lg shadow text-sm">
+                    <i class="fas fa-user text-indigo-600"></i>
                     <span id="user-name" class="font-semibold text-gray-700">Usuário</span>
                     <span class="text-gray-300 mx-1">|</span>
                     <span id="year-balance-value" class="font-bold text-green-600 text-sm"></span>
@@ -86,10 +86,10 @@
                         <i id="toggle-balance-icon" class="fas fa-eye text-sm"></i>
                     </button>
                 </div>
-                <select id="year-select" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white shadow">
+                <select id="year-select" class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white shadow text-sm">
                     <option value="2025">2025</option>
                 </select>
-                <button id="logout-btn" class="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow">
+                <button id="logout-btn" class="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow text-sm">
                     <i class="fas fa-sign-out-alt"></i>
                     Sair
                 </button>
@@ -97,12 +97,12 @@
         </div>
 
         <!-- Tabs -->
-        <div class="flex gap-4 mb-6 overflow-x-auto pb-2">
-            <button class="tab-btn px-6 py-3 rounded-lg font-semibold transition-all bg-indigo-600 text-white shadow-lg" data-tab="overview">Visão Geral</button>
-            <button class="tab-btn px-6 py-3 rounded-lg font-semibold transition-all bg-white text-gray-700 hover:bg-gray-50" data-tab="transactions">Lançamentos</button>
-            <button class="tab-btn px-6 py-3 rounded-lg font-semibold transition-all bg-white text-gray-700 hover:bg-gray-50" data-tab="categories">Categorias</button>
-            <button class="tab-btn px-6 py-3 rounded-lg font-semibold transition-all bg-white text-gray-700 hover:bg-gray-50" data-tab="goals">Objetivos</button>
-            <button class="tab-btn px-6 py-3 rounded-lg font-semibold transition-all bg-white text-gray-700 hover:bg-gray-50" data-tab="analysis">Análises</button>
+        <div class="flex gap-2 mb-6 overflow-x-auto pb-2 scrollbar-hide">
+            <button class="tab-btn px-3 py-2 md:px-6 md:py-3 rounded-lg font-semibold transition-all bg-indigo-600 text-white shadow-lg text-xs md:text-sm whitespace-nowrap" data-tab="overview">Visão Geral</button>
+            <button class="tab-btn px-3 py-2 md:px-6 md:py-3 rounded-lg font-semibold transition-all bg-white text-gray-700 hover:bg-gray-50 text-xs md:text-sm whitespace-nowrap" data-tab="transactions">Lançamentos</button>
+            <button class="tab-btn px-3 py-2 md:px-6 md:py-3 rounded-lg font-semibold transition-all bg-white text-gray-700 hover:bg-gray-50 text-xs md:text-sm whitespace-nowrap" data-tab="categories">Categorias</button>
+            <button class="tab-btn px-3 py-2 md:px-6 md:py-3 rounded-lg font-semibold transition-all bg-white text-gray-700 hover:bg-gray-50 text-xs md:text-sm whitespace-nowrap" data-tab="goals">Objetivos</button>
+            <button class="tab-btn px-3 py-2 md:px-6 md:py-3 rounded-lg font-semibold transition-all bg-white text-gray-700 hover:bg-gray-50 text-xs md:text-sm whitespace-nowrap" data-tab="analysis">Análises</button>
         </div>
 
         <!-- Overview Tab -->
@@ -111,41 +111,41 @@
             <div class="flex items-center gap-3 mb-2">
                 <h2 class="text-lg font-semibold text-gray-600">Resumo de <span id="overview-month-label" class="text-indigo-600 font-bold"></span></h2>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-green-500">
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
+                <div class="bg-white rounded-lg shadow-md p-4 md:p-6 border-l-4 border-green-500">
                     <div class="flex items-center justify-between">
                         <div>
-                            <p class="text-sm text-gray-600 mb-1">Receita Total</p>
-                            <p id="total-income" class="text-2xl font-bold text-gray-800">R$ 0</p>
+                            <p class="text-xs md:text-sm text-gray-600 mb-1">Receita Total</p>
+                            <p id="total-income" class="text-lg md:text-2xl font-bold text-gray-800">R$ 0</p>
                         </div>
-                        <i class="fas fa-dollar-sign text-4xl text-gray-400"></i>
+                        <i class="fas fa-dollar-sign text-2xl md:text-4xl text-gray-400"></i>
                     </div>
                 </div>
-                <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-red-500">
+                <div class="bg-white rounded-lg shadow-md p-4 md:p-6 border-l-4 border-red-500">
                     <div class="flex items-center justify-between">
                         <div>
-                            <p class="text-sm text-gray-600 mb-1">Despesas Total</p>
-                            <p id="total-expenses" class="text-2xl font-bold text-gray-800">R$ 0</p>
+                            <p class="text-xs md:text-sm text-gray-600 mb-1">Despesas Total</p>
+                            <p id="total-expenses" class="text-lg md:text-2xl font-bold text-gray-800">R$ 0</p>
                         </div>
-                        <i class="fas fa-credit-card text-4xl text-gray-400"></i>
+                        <i class="fas fa-credit-card text-2xl md:text-4xl text-gray-400"></i>
                     </div>
                 </div>
-                <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-blue-500">
+                <div class="bg-white rounded-lg shadow-md p-4 md:p-6 border-l-4 border-blue-500">
                     <div class="flex items-center justify-between">
                         <div>
-                            <p class="text-sm text-gray-600 mb-1">Economia Total</p>
-                            <p id="total-savings" class="text-2xl font-bold text-gray-800">R$ 0</p>
+                            <p class="text-xs md:text-sm text-gray-600 mb-1">Economia Total</p>
+                            <p id="total-savings" class="text-lg md:text-2xl font-bold text-gray-800">R$ 0</p>
                         </div>
-                        <i class="fas fa-piggy-bank text-4xl text-gray-400"></i>
+                        <i class="fas fa-piggy-bank text-2xl md:text-4xl text-gray-400"></i>
                     </div>
                 </div>
-                <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-purple-500">
+                <div class="bg-white rounded-lg shadow-md p-4 md:p-6 border-l-4 border-purple-500">
                     <div class="flex items-center justify-between">
                         <div>
-                            <p class="text-sm text-gray-600 mb-1">Taxa Poupança</p>
-                            <p id="savings-rate" class="text-2xl font-bold text-gray-800">0%</p>
+                            <p class="text-xs md:text-sm text-gray-600 mb-1">Taxa Poupança</p>
+                            <p id="savings-rate" class="text-lg md:text-2xl font-bold text-gray-800">0%</p>
                         </div>
-                        <i class="fas fa-chart-line text-4xl text-gray-400"></i>
+                        <i class="fas fa-chart-line text-2xl md:text-4xl text-gray-400"></i>
                     </div>
                 </div>
             </div>
@@ -248,16 +248,16 @@
             </div>
             <div class="bg-white rounded-lg shadow-md p-6">
                 <h3 class="text-xl font-bold text-gray-800 mb-4">Lançamentos (<span id="transaction-count">0</span>)</h3>
-                <div class="overflow-x-auto">
-                    <table class="w-full">
+                <div class="overflow-x-auto -mx-2">
+                    <table class="w-full min-w-[600px]">
                         <thead class="bg-gray-50">
                             <tr>
-                                <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Data</th>
-                                <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Tipo</th>
-                                <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Categoria</th>
-                                <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Descrição</th>
-                                <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Valor</th>
-                                <th class="px-4 py-3 text-center text-sm font-semibold text-gray-700">Ações</th>
+                                <th class="px-3 py-3 text-left text-xs font-semibold text-gray-700">Data</th>
+                                <th class="px-3 py-3 text-left text-xs font-semibold text-gray-700">Tipo</th>
+                                <th class="px-3 py-3 text-left text-xs font-semibold text-gray-700">Categoria</th>
+                                <th class="px-3 py-3 text-left text-xs font-semibold text-gray-700">Descrição</th>
+                                <th class="px-3 py-3 text-right text-xs font-semibold text-gray-700">Valor</th>
+                                <th class="px-3 py-3 text-center text-xs font-semibold text-gray-700">Ações</th>
                             </tr>
                         </thead>
                         <tbody id="transaction-table" class="divide-y divide-gray-200"></tbody>
@@ -844,18 +844,18 @@
             document.getElementById('transaction-count').textContent = filteredTransactions.length;
             document.getElementById('transaction-table').innerHTML = filteredTransactions.sort((a, b) => new Date(b.date) - new Date(a.date)).map(t => `
                 <tr class="hover:bg-gray-50">
-                    <td class="px-4 py-3 text-sm text-gray-700">${new Date(t.date).toLocaleDateString('pt-BR')}</td>
-                    <td class="px-4 py-3">
+                    <td class="px-3 py-2 text-xs text-gray-700">${new Date(t.date).toLocaleDateString('pt-BR')}</td>
+                    <td class="px-3 py-2">
                         <span class="px-2 py-1 rounded-full text-xs font-semibold ${t.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
                             ${t.type === 'income' ? 'Receita' : 'Despesa'}
                         </span>
                     </td>
-                    <td class="px-4 py-3 text-sm text-gray-700">${t.category}</td>
-                    <td class="px-4 py-3 text-sm text-gray-700">${t.description}</td>
-                    <td class="px-4 py-3 text-sm text-right font-semibold ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}">
+                    <td class="px-3 py-2 text-xs text-gray-700">${t.category}</td>
+                    <td class="px-3 py-2 text-xs text-gray-700">${t.description}</td>
+                    <td class="px-3 py-2 text-xs text-right font-semibold ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}">
                         ${t.type === 'income' ? '+' : '-'} R$ ${t.amount.toLocaleString('pt-BR')}
                     </td>
-                    <td class="px-4 py-3 text-center">
+                    <td class="px-3 py-2 text-center">
                         <button onclick="deleteTransaction('${t.id}')" class="text-red-600 hover:text-red-800"><i class="fas fa-trash-alt"></i></button>
                     </td>
                 </tr>
