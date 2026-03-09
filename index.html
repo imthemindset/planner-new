@@ -81,7 +81,7 @@
                     <i class="fas fa-user text-indigo-600"></i>
                     <span id="user-name" class="font-semibold text-gray-700">Usuário</span>
                     <span class="text-gray-300 mx-1">|</span>
-                    <span id="year-balance-value" class="font-bold text-green-600 text-sm"></span>
+                    <span id="year-balance-value" class="font-bold text-green-600 text-sm inline-block" style="min-width:90px;"></span>
                     <button id="toggle-balance-btn" class="text-gray-400 hover:text-indigo-600 transition-colors ml-1" title="Mostrar/ocultar saldo">
                         <i id="toggle-balance-icon" class="fas fa-eye text-sm"></i>
                     </button>
@@ -163,37 +163,37 @@
 
         <!-- Transactions Tab -->
         <div id="transactions" class="tab-content hidden space-y-6">
-            <div class="bg-white rounded-lg shadow-md p-6">
-                <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                    <i class="fas fa-plus text-2xl"></i> Novo Lançamento
+            <div class="bg-white rounded-lg shadow-md p-4 md:p-6">
+                <h3 class="text-lg md:text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                    <i class="fas fa-plus"></i> Novo Lançamento
                 </h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     <div>
-                        <label class="block text-sm font-semibold text-gray-700 mb-2">Data</label>
-                        <input type="date" id="new-transaction-date" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                        <label class="block text-xs md:text-sm font-semibold text-gray-700 mb-1">Data</label>
+                        <input type="date" id="new-transaction-date" class="w-full px-2 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
                     </div>
                     <div>
-                        <label class="block text-sm font-semibold text-gray-700 mb-2">Tipo</label>
-                        <select id="new-transaction-type" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                        <label class="block text-xs md:text-sm font-semibold text-gray-700 mb-1">Tipo</label>
+                        <select id="new-transaction-type" class="w-full px-2 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
                             <option value="expense">Despesa</option>
                             <option value="income">Receita</option>
                         </select>
                     </div>
                     <div>
-                        <label class="block text-sm font-semibold text-gray-700 mb-2">Categoria</label>
-                        <select id="new-transaction-category" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                        <label class="block text-xs md:text-sm font-semibold text-gray-700 mb-1">Categoria</label>
+                        <select id="new-transaction-category" class="w-full px-2 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
                         </select>
                     </div>
                     <div>
-                        <label class="block text-sm font-semibold text-gray-700 mb-2">Valor</label>
-                        <input type="number" step="0.01" id="new-transaction-amount" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                        <label class="block text-xs md:text-sm font-semibold text-gray-700 mb-1">Valor</label>
+                        <input type="number" step="0.01" id="new-transaction-amount" class="w-full px-2 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
                     </div>
-                    <div class="md:col-span-2">
-                        <label class="block text-sm font-semibold text-gray-700 mb-2">Descrição</label>
-                        <input type="text" id="new-transaction-description" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="Descreva o lançamento">
+                    <div class="col-span-2 lg:col-span-2">
+                        <label class="block text-xs md:text-sm font-semibold text-gray-700 mb-1">Descrição</label>
+                        <input type="text" id="new-transaction-description" class="w-full px-2 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="Descreva o lançamento">
                     </div>
                 </div>
-                <button id="add-transaction-btn" class="mt-4 w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2">
+                <button id="add-transaction-btn" class="mt-4 w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 text-sm">
                     <i class="fas fa-plus"></i> Adicionar Lançamento
                 </button>
             </div>
