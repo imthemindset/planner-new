@@ -27,14 +27,15 @@
         }
         /* Fix date input height on iOS Safari */
         input[type="date"] {
-            -webkit-appearance: none;
-            appearance: none;
+            -webkit-appearance: textfield;
+            appearance: textfield;
             height: 38px !important;
             min-height: 38px !important;
             max-height: 38px !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+            line-height: 38px;
             box-sizing: border-box;
-            display: flex;
-            align-items: center;
         }
     </style>
 </head>
@@ -526,14 +527,15 @@
 
         // Update Years
         function updateYears() {
+            const _now = new Date();
+            const currentYear = _now.getFullYear();
             const years = [...new Set(transactions.map(t => new Date(t.date).getFullYear()))];
-            const allYears = [2025, 2026, 2027, 2028, 2029, 2030];
+            const allYears = [currentYear, currentYear+1, currentYear+2, currentYear+3, currentYear+4];
             years.forEach(year => { if (!allYears.includes(year)) allYears.push(year); });
             allYears.sort();
             
             const yearSelect = document.getElementById('year-select');
             const filterYearSelect = document.getElementById('filter-year');
-            // ALTERAÇÃO: Preencher o select de ano dos filtros de categoria
             const categoryFilterYearSelect = document.getElementById('category-filter-year');
             yearSelect.innerHTML = allYears.map(year => `<option value="${year}">${year}</option>`).join('');
             filterYearSelect.innerHTML = '<option value="">Todos</option>' + allYears.map(year => `<option value="${year}">${year}</option>`).join('');
@@ -541,11 +543,14 @@
             yearSelect.value = selectedYear;
 
             // Sincroniza selects de filtro com mês/ano atual
-            const _now = new Date();
-            document.getElementById('filter-year').value = String(_now.getFullYear());
+            document.getElementById('filter-year').value = String(currentYear);
             document.getElementById('filter-month').value = String(_now.getMonth());
-            document.getElementById('category-filter-year').value = String(_now.getFullYear());
+            document.getElementById('category-filter-year').value = String(currentYear);
             document.getElementById('category-filter-month').value = String(_now.getMonth());
+            filters.year = String(currentYear);
+            filters.month = String(_now.getMonth());
+            categoryFilters.year = String(currentYear);
+            categoryFilters.month = String(_now.getMonth());
         }
 
         document.getElementById('year-select').addEventListener('change', () => {
@@ -798,23 +803,29 @@
             `).join('') : '<p class="text-center text-gray-500 py-4">Nenhuma despesa no período selecionado</p>';
         }
 
-        // Toggle balance visibility
-        let balanceVisible = true;
-        document.getElementById('toggle-balance-btn').addEventListener('click', () => {
-            balanceVisible = !balanceVisible;
+        // Toggle balance visibility - persiste no localStorage
+        let balanceVisible = localStorage.getItem('balanceVisible') !== 'false';
+
+        function applyBalanceVisibility() {
             const icon = document.getElementById('toggle-balance-icon');
             const valueEl = document.getElementById('year-balance-value');
             if (balanceVisible) {
                 icon.classList.remove('fa-eye-slash');
                 icon.classList.add('fa-eye');
-                valueEl.dataset.hidden = 'false';
                 updateYearBalance();
             } else {
                 icon.classList.remove('fa-eye');
                 icon.classList.add('fa-eye-slash');
                 valueEl.textContent = '••••••';
-                valueEl.className = 'font-bold text-gray-400 text-sm';
+                valueEl.className = 'font-bold text-gray-400 text-sm inline-block';
+                valueEl.style.minWidth = '90px';
             }
+        }
+
+        document.getElementById('toggle-balance-btn').addEventListener('click', () => {
+            balanceVisible = !balanceVisible;
+            localStorage.setItem('balanceVisible', balanceVisible);
+            applyBalanceVisibility();
         });
 
         function updateYearBalance() {
@@ -825,8 +836,12 @@
             const yearBalance = yearIncome - yearExpenses;
             const valueEl = document.getElementById('year-balance-value');
             valueEl.textContent = `R$ ${yearBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
-            valueEl.className = `font-bold text-sm ${yearBalance >= 0 ? 'text-green-600' : 'text-red-500'}`;
+            valueEl.className = `font-bold text-sm inline-block ${yearBalance >= 0 ? 'text-green-600' : 'text-red-500'}`;
+            valueEl.style.minWidth = '90px';
         }
+
+        // Aplica estado salvo do olhinho ao carregar
+        applyBalanceVisibility();
 
         // Update UI
         function updateUI() {
