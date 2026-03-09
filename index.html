@@ -80,6 +80,11 @@
                 <div class="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow">
                     <i class="fas fa-user text-xl text-indigo-600"></i>
                     <span id="user-name" class="font-semibold text-gray-700">Usuário</span>
+                    <span class="text-gray-300 mx-1">|</span>
+                    <span id="year-balance-value" class="font-bold text-green-600 text-sm"></span>
+                    <button id="toggle-balance-btn" class="text-gray-400 hover:text-indigo-600 transition-colors ml-1" title="Mostrar/ocultar saldo">
+                        <i id="toggle-balance-icon" class="fas fa-eye text-sm"></i>
+                    </button>
                 </div>
                 <select id="year-select" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white shadow">
                     <option value="2025">2025</option>
@@ -102,6 +107,10 @@
 
         <!-- Overview Tab -->
         <div id="overview" class="tab-content space-y-6">
+            <!-- ALTERAÇÃO: Mostrar mês vigente no cabeçalho da visão geral -->
+            <div class="flex items-center gap-3 mb-2">
+                <h2 class="text-lg font-semibold text-gray-600">Resumo de <span id="overview-month-label" class="text-indigo-600 font-bold"></span></h2>
+            </div>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-green-500">
                     <div class="flex items-center justify-between">
@@ -259,14 +268,48 @@
         </div>
 
         <!-- Categories Tab -->
-        <div id="categories" class="tab-content hidden grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- ALTERAÇÃO: Adicionados filtros de ano e mês na aba Categorias -->
+        <div id="categories" class="tab-content hidden space-y-6">
             <div class="bg-white rounded-lg shadow-md p-6">
-                <h3 class="text-xl font-bold text-gray-800 mb-4">Distribuição de Despesas</h3>
-                <canvas id="category-chart" class="chart-container"></canvas>
+                <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                    <i class="fas fa-filter text-2xl"></i> Filtros de Categorias
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">Ano</label>
+                        <select id="category-filter-year" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                            <option value="">Todos</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">Mês</label>
+                        <select id="category-filter-month" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                            <option value="">Todos</option>
+                            <option value="0">Jan</option>
+                            <option value="1">Fev</option>
+                            <option value="2">Mar</option>
+                            <option value="3">Abr</option>
+                            <option value="4">Mai</option>
+                            <option value="5">Jun</option>
+                            <option value="6">Jul</option>
+                            <option value="7">Ago</option>
+                            <option value="8">Set</option>
+                            <option value="9">Out</option>
+                            <option value="10">Nov</option>
+                            <option value="11">Dez</option>
+                        </select>
+                    </div>
+                </div>
             </div>
-            <div class="bg-white rounded-lg shadow-md p-6">
-                <h3 class="text-xl font-bold text-gray-800 mb-4">Detalhamento</h3>
-                <div id="category-details" class="space-y-3"></div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <h3 class="text-xl font-bold text-gray-800 mb-4">Distribuição de Despesas</h3>
+                    <canvas id="category-chart" class="chart-container"></canvas>
+                </div>
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <h3 class="text-xl font-bold text-gray-800 mb-4">Detalhamento</h3>
+                    <div id="category-details" class="space-y-3"></div>
+                </div>
             </div>
         </div>
 
@@ -354,8 +397,9 @@
         const db = getFirestore(app);
 
         // Global Variables
+        // ALTERAÇÃO: Adicionado 'Cartão de Crédito' nas categorias de despesa
         const categories = {
-            expense: ['Moradia', 'Alimentação', 'Transporte', 'Saúde', 'Lazer', 'Educação', 'Outros'],
+            expense: ['Moradia', 'Alimentação', 'Transporte', 'Saúde', 'Lazer', 'Educação', 'Cartão de Crédito', 'Outros'],
             income: ['Salário', 'Freelance', 'Investimentos', 'Outros']
         };
 
@@ -364,6 +408,8 @@
         let currentUser = null;
         let selectedYear = 2025;
         let filters = { year: '', month: '', category: '', type: '', search: '' };
+        // ALTERAÇÃO: Filtros para a aba Categorias
+        let categoryFilters = { year: '', month: '' };
         let cashflowChart, monthlyChart, categoryChart;
 
         // Authentication Listener
@@ -476,14 +522,27 @@
             
             const yearSelect = document.getElementById('year-select');
             const filterYearSelect = document.getElementById('filter-year');
+            // ALTERAÇÃO: Preencher o select de ano dos filtros de categoria
+            const categoryFilterYearSelect = document.getElementById('category-filter-year');
             yearSelect.innerHTML = allYears.map(year => `<option value="${year}">${year}</option>`).join('');
             filterYearSelect.innerHTML = '<option value="">Todos</option>' + allYears.map(year => `<option value="${year}">${year}</option>`).join('');
+            categoryFilterYearSelect.innerHTML = '<option value="">Todos</option>' + allYears.map(year => `<option value="${year}">${year}</option>`).join('');
             yearSelect.value = selectedYear;
         }
 
         document.getElementById('year-select').addEventListener('change', () => {
             selectedYear = parseInt(document.getElementById('year-select').value);
             updateUI();
+        });
+
+        // ALTERAÇÃO: Listeners para os filtros de categoria
+        document.getElementById('category-filter-year').addEventListener('change', (e) => {
+            categoryFilters.year = e.target.value;
+            updateCharts();
+        });
+        document.getElementById('category-filter-month').addEventListener('change', (e) => {
+            categoryFilters.month = e.target.value;
+            updateCharts();
         });
 
         // Add Transaction
@@ -644,13 +703,22 @@
                 return { month, income, expenses, savings: income - expenses };
             });
 
+            // ALTERAÇÃO: Aplicar filtros de ano e mês na aba de categorias
             const categoryData = (() => {
-                const yearTransactions = transactions.filter(t => new Date(t.date).getFullYear() === selectedYear && t.type === 'expense');
+                let categoryTransactions = transactions.filter(t => t.type === 'expense');
+                if (categoryFilters.year) {
+                    categoryTransactions = categoryTransactions.filter(t => new Date(t.date).getFullYear() === parseInt(categoryFilters.year));
+                } else {
+                    categoryTransactions = categoryTransactions.filter(t => new Date(t.date).getFullYear() === selectedYear);
+                }
+                if (categoryFilters.month !== '') {
+                    categoryTransactions = categoryTransactions.filter(t => new Date(t.date).getMonth() === parseInt(categoryFilters.month));
+                }
                 const categoryTotals = {};
-                yearTransactions.forEach(t => {
+                categoryTransactions.forEach(t => {
                     categoryTotals[t.category] = (categoryTotals[t.category] || 0) + t.amount;
                 });
-                const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6b7280'];
+                const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6b7280', '#f97316'];
                 return Object.entries(categoryTotals).map(([name, value], index) => ({
                     name, value, color: colors[index % colors.length]
                 }));
@@ -697,7 +765,8 @@
             });
 
             const categoryDetails = document.getElementById('category-details');
-            categoryDetails.innerHTML = categoryData.map(cat => `
+            const totalCategoryValue = categoryData.reduce((sum, c) => sum + c.value, 0);
+            categoryDetails.innerHTML = categoryData.length > 0 ? categoryData.map(cat => `
                 <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                     <div class="flex items-center gap-3">
                         <div class="w-4 h-4 rounded-full" style="background-color: ${cat.color}"></div>
@@ -705,19 +774,61 @@
                     </div>
                     <div class="text-right">
                         <p class="font-bold text-gray-800">R$ ${cat.value.toLocaleString('pt-BR')}</p>
-                        <p class="text-sm text-gray-500">${((cat.value / categoryData.reduce((sum, c) => sum + c.value, 0)) * 100).toFixed(1)}%</p>
+                        <p class="text-sm text-gray-500">${((cat.value / totalCategoryValue) * 100).toFixed(1)}%</p>
                     </div>
                 </div>
-            `).join('');
+            `).join('') : '<p class="text-center text-gray-500 py-4">Nenhuma despesa no período selecionado</p>';
+        }
+
+        // Toggle balance visibility
+        let balanceVisible = true;
+        document.getElementById('toggle-balance-btn').addEventListener('click', () => {
+            balanceVisible = !balanceVisible;
+            const icon = document.getElementById('toggle-balance-icon');
+            const valueEl = document.getElementById('year-balance-value');
+            if (balanceVisible) {
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+                valueEl.dataset.hidden = 'false';
+                updateYearBalance();
+            } else {
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+                valueEl.textContent = '••••••';
+                valueEl.className = 'font-bold text-gray-400 text-sm';
+            }
+        });
+
+        function updateYearBalance() {
+            if (!balanceVisible) return;
+            const yearTransactions = transactions.filter(t => new Date(t.date).getFullYear() === selectedYear);
+            const yearIncome = yearTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
+            const yearExpenses = yearTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
+            const yearBalance = yearIncome - yearExpenses;
+            const valueEl = document.getElementById('year-balance-value');
+            valueEl.textContent = `R$ ${yearBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+            valueEl.className = `font-bold text-sm ${yearBalance >= 0 ? 'text-green-600' : 'text-red-500'}`;
         }
 
         // Update UI
         function updateUI() {
             if (!currentUser) return;
 
-            const yearTransactions = transactions.filter(t => new Date(t.date).getFullYear() === selectedYear);
-            const totalIncome = yearTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
-            const totalExpenses = yearTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
+            updateYearBalance();
+
+            // ALTERAÇÃO: Visão Geral mostra apenas o mês vigente
+            const now = new Date();
+            const currentMonth = now.getMonth();
+            const currentYear = now.getFullYear();
+            const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+            document.getElementById('overview-month-label').textContent = `${monthNames[currentMonth]} ${currentYear}`;
+
+            const currentMonthTransactions = transactions.filter(t => {
+                const d = new Date(t.date);
+                return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+            });
+            const totalIncome = currentMonthTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
+            const totalExpenses = currentMonthTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
             const totalSavings = totalIncome - totalExpenses;
             const savingsRate = totalIncome > 0 ? (totalSavings / totalIncome) * 100 : 0;
 
@@ -792,4 +903,3 @@
 
 </body>
 </html>
-
