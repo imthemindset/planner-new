@@ -25,6 +25,17 @@
             width: 100% !important;
             height: 100% !important;
         }
+        /* Fix date input height on iOS Safari */
+        input[type="date"] {
+            -webkit-appearance: none;
+            appearance: none;
+            height: 38px !important;
+            min-height: 38px !important;
+            max-height: 38px !important;
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+        }
     </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
@@ -406,10 +417,10 @@
         let transactions = [];
         let goals = [];
         let currentUser = null;
-        let selectedYear = 2025;
-        let filters = { year: '', month: '', category: '', type: '', search: '' };
+        let selectedYear = new Date().getFullYear();
+        let filters = { year: String(new Date().getFullYear()), month: String(new Date().getMonth()), category: '', type: '', search: '' };
         // ALTERAÇÃO: Filtros para a aba Categorias
-        let categoryFilters = { year: '', month: '' };
+        let categoryFilters = { year: String(new Date().getFullYear()), month: String(new Date().getMonth()) };
         let cashflowChart, monthlyChart, categoryChart;
 
         // Authentication Listener
@@ -528,6 +539,13 @@
             filterYearSelect.innerHTML = '<option value="">Todos</option>' + allYears.map(year => `<option value="${year}">${year}</option>`).join('');
             categoryFilterYearSelect.innerHTML = '<option value="">Todos</option>' + allYears.map(year => `<option value="${year}">${year}</option>`).join('');
             yearSelect.value = selectedYear;
+
+            // Sincroniza selects de filtro com mês/ano atual
+            const _now = new Date();
+            document.getElementById('filter-year').value = String(_now.getFullYear());
+            document.getElementById('filter-month').value = String(_now.getMonth());
+            document.getElementById('category-filter-year').value = String(_now.getFullYear());
+            document.getElementById('category-filter-month').value = String(_now.getMonth());
         }
 
         document.getElementById('year-select').addEventListener('change', () => {
