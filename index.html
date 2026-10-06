@@ -257,7 +257,7 @@ pre.code{background:rgba(148,163,184,.15);border-radius:12px;padding:12px;font-s
 /* =====================================================================
    0. CONFIGURAÇÃO E CONSTANTES
    ===================================================================== */
-const APP_VERSION='2.0 (bloco A)';
+const APP_VERSION='2.1 (bloco B)';
 const FB_VER='10.12.0';
 const firebaseConfig={
   apiKey:"AIzaSyCdLPPg0DNm99j5sL02QGONqa_LQZ4Ns7M",
@@ -1614,6 +1614,493 @@ Object.assign(actions,{
   'terms'(){openSheet(`<h3>Termos e privacidade</h3><div class="small muted" style="line-height:1.55"><p><b>Seus dados são seus.</b> Lançamentos, metas e configurações ficam no seu projeto Firebase, ligados à sua conta, e não são vendidos nem compartilhados com terceiros por este app.</p><p><b>Voz.</b> O reconhecimento de voz é feito pelo serviço do seu navegador (no Chrome, o áudio pode ser processado nos servidores do Google).</p><p><b>Fotos.</b> A foto de perfil fica reduzida (256 px) dentro das suas configurações. Comprovantes serão processados conforme o bloco B e só anexados se você confirmar.</p><p><b>Exclusão.</b> Em Conta e segurança você exclui a conta e todos os dados.</p><p>Este app é uma ferramenta de organização pessoal e não oferece aconselhamento financeiro.</p></div><button class="btn ghost block" style="margin-top:12px" data-sheet-x="0">Fechar</button>`);}
 });
 
+/* =====================================================================
+   16. VOZ (bloco B): interpretação, reconhecimento, confirmação, consultas e autoteste
+   ===================================================================== */
+(()=>{const st=document.createElement('style');st.textContent=`
+.mic-big{width:92px;height:92px;border-radius:50%;margin:8px auto;display:grid;place-items:center;font-size:38px;background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;box-shadow:0 16px 34px -10px rgba(99,102,241,.8)}
+.mic-big.on{animation:pulse 1.4s infinite;background:linear-gradient(135deg,#f43f5e,#e11d48)}
+.mic-big:disabled{opacity:.5}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(244,63,94,.5)}100%{box-shadow:0 0 0 28px rgba(244,63,94,0)}}
+.wave{display:flex;gap:5px;align-items:center;justify-content:center;height:46px}
+.wave i{width:6px;height:8px;border-radius:4px;background:var(--brand);animation:wv 1s ease-in-out infinite;animation-play-state:paused}
+.wave.on i{animation-play-state:running}.wave.talk i{background:var(--income)}
+.wave i:nth-child(2n){animation-delay:.15s}.wave i:nth-child(3n){animation-delay:.3s}.wave i:nth-child(5n){animation-delay:.45s}
+@keyframes wv{0%,100%{height:8px}50%{height:40px}}
+.live{min-height:56px;padding:12px 14px;border-radius:14px;background:rgba(99,102,241,.08);border:1px dashed var(--line);font-size:16px;margin:8px 0}
+.live.final{border-style:solid}.live .interim{color:var(--muted)}
+.vitem{border:1px solid var(--line);border-radius:18px;padding:14px;margin-bottom:12px;background:var(--card)}
+.vitem .hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-weight:800}
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.steps li{display:flex;gap:12px;align-items:flex-start;padding:12px;border-radius:14px;background:var(--card);border:1px solid var(--line)}
+.steps .st{font-size:20px;line-height:1.2;flex:none;width:26px;text-align:center}
+.steps small{display:block;color:var(--muted);margin-top:3px;font-size:12px;line-height:1.45}
+.meter{height:10px;border-radius:99px;background:rgba(148,163,184,.25);overflow:hidden;margin-top:8px}
+.meter i{display:block;height:100%;width:0;background:var(--income);transition:width .08s}
+.thumb{width:100%;max-height:230px;object-fit:contain;border-radius:14px;background:rgba(148,163,184,.15);margin-bottom:12px}
+`;document.head.appendChild(st);})();
+
+const VT={run:0};
+let VC=null,vdraft=null;
+const _closeSheetB=closeSheet;
+closeSheet=function(v=false){VT.run++;stopVoice();try{if(window.speechSynthesis)speechSynthesis.cancel();}catch{}vdraft=null;return _closeSheetB(v);};
+
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+const NW={zero:0,um:1,uma:1,dois:2,duas:2,tres:3,quatro:4,cinco:5,seis:6,sete:7,oito:8,nove:9,dez:10,onze:11,doze:12,treze:13,catorze:14,quatorze:14,quinze:15,dezesseis:16,dezessete:17,dezoito:18,dezenove:19,vinte:20,trinta:30,quarenta:40,cinquenta:50,sessenta:60,setenta:70,oitenta:80,noventa:90,cem:100,cento:100,duzentos:200,duzentas:200,trezentos:300,trezentas:300,quatrocentos:400,quatrocentas:400,quinhentos:500,quinhentas:500,seiscentos:600,seiscentas:600,setecentos:700,setecentas:700,oitocentos:800,oitocentas:800,novecentos:900,novecentas:900};
+const MONTH_N=['janeiro','fevereiro','marco','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+const WDAY_N=['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
+const V_EXPENSE=['gastei','paguei','comprei','parcelei','assinei','saiu'];
+const V_INCOME=['recebi','ganhei','vendi','depositaram','entrou','rendeu','pagaram'];
+const V_INVEST=['investi','apliquei','aportei','guardei'];
+const V_ALL=[...V_EXPENSE,...V_INCOME,...V_INVEST,'transferi'];
+const vnorm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/r\$\s*/g,' reais ').replace(/[^a-z0-9,.\s]/g,' ').replace(/\.(?!\d)/g,' ').replace(/,(?!\d)/g,' | ').replace(/\s+/g,' ').trim();
+
+// --- números por extenso → dígitos ("dois mil e quinhentos" → 2500, "dez e meio" → 10,5)
+function numRun(tk,i){
+  const isN=t=>t in NW;let j=i,total=0,cur=0,any=false,prev=false,onlyUm=true,count=0;
+  while(j<tk.length){
+    const t=tk[j];
+    if(isN(t)){cur+=NW[t];any=true;prev=true;count++;if(t!=='um'&&t!=='uma')onlyUm=false;j++;}
+    else if(t==='mil'){cur=(cur||1)*1000;total+=cur;cur=0;any=true;prev=true;onlyUm=false;j++;}
+    else if(t==='e'&&prev&&j+1<tk.length&&(isN(tk[j+1])||tk[j+1]==='mil')){j++;prev=false;}
+    else break;
+  }
+  if(!any)return null;
+  let val=total+cur;
+  if(tk[j]==='e'&&(tk[j+1]==='meio'||tk[j+1]==='meia')){val+=(val>=1000&&val%1000===0)?500:0.5;j+=2;}
+  if(onlyUm&&count===1&&!['real','reais','conto','contos'].includes(tk[j]))return null; // "um tênis" não é número
+  return {val,end:j};
+}
+function numberWords(t){
+  const tk=t.split(' '),out=[];
+  for(let i=0;i<tk.length;){const r=numRun(tk,i);if(r&&r.end>i){out.push(String(Math.round(r.val*100)/100).replace('.',','));i=r.end;}else{out.push(tk[i]);i++;}}
+  return out.join(' ');
+}
+function expandMil(t){
+  const pn=a=>/^\d{1,3}(\.\d{3})+$/.test(a)?parseFloat(a.replace(/\./g,'')):parseFloat(a.replace(',','.'));
+  return t.replace(/(\d+(?:[.,]\d+)?)\s*mil\b(?:\s+e\s+(\d{1,3})\b)?/g,(m,a,b)=>String(Math.round(pn(a)*1000+(b?parseInt(b,10):0)))).replace(/\b(\d+(?:,\d+)?)\s*k\b/g,(m,a)=>String(Math.round(pn(a)*1000)));
+}
+function amountsIn(t){
+  const re=/\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?/g,out=[];let m;
+  while((m=re.exec(t))){
+    const raw=m[0];
+    const v=raw.includes(',')?parseFloat(raw.replace(/\./g,'').replace(',','.')):/^\d{1,3}(\.\d{3})+$/.test(raw)?parseFloat(raw.replace(/\./g,'')):parseFloat(raw);
+    out.push({v,i:m.index,end:m.index+raw.length});
+  }
+  return out;
+}
+function mergeNoNum(parts){
+  const out=[];
+  parts.forEach(p=>{p=p.trim();if(!p)return;if(!/\d/.test(p)&&out.length)out[out.length-1]+=' '+p;else out.push(p);});
+  if(out.length>1&&!/\d/.test(out[0])){const f=out.shift();out[0]=f+' '+out[0];}
+  return out;
+}
+function splitSegments(t){
+  t=t.replace(/\s(?:e tambem|tambem|e depois|depois|alem disso)\s/g,' | ');
+  const vRe=new RegExp('\\s(?=(?:'+V_ALL.join('|')+')\\b)'),eRe=/\s+e\s+(?=(?:reais\s+)?\d[\d.,]*(?:\s+(?!centavos\b)\S|$))/;
+  let parts=t.split(/\s*\|\s*/).filter(Boolean);
+  parts=parts.flatMap(p=>p.split(vRe)).flatMap(p=>p.split(eRe));
+  return mergeNoNum(parts);
+}
+function voiceDate(t,past){
+  const today=todayStr(),now=parseYMD(today),mre=MONTH_N.join('|');
+  if(/\banteontem\b/.test(t))return addDays(today,-2);
+  if(/\bontem\b/.test(t))return addDays(today,-1);
+  if(/\bamanha\b/.test(t))return addDays(today,1);
+  if(/\bhoje\b/.test(t))return today;
+  if(/semana passada/.test(t))return addDays(today,-7);
+  const m=t.match(new RegExp(`\\bdia (\\d{1,2})(?: de (${mre}))?`))||t.match(new RegExp(`\\b(\\d{1,2}) de (${mre})`));
+  if(m){
+    const day=+m[1],mi=m[2]?MONTH_N.indexOf(m[2]):null;
+    const mk=(y,mo)=>{const d=new Date(y,mo,1);d.setDate(Math.min(day,daysIn(d.getFullYear(),d.getMonth()+1)));return ymd(d);};
+    let y=now.getFullYear(),mo=mi!=null?mi:now.getMonth();
+    if(mi==null&&/mes passado/.test(t))mo-=1;
+    let s=mk(y,mo);
+    if(s>today&&past)s=mi==null?mk(y,mo-1):mk(y-1,mo);
+    return s;
+  }
+  const w=t.match(/\b(segunda|terca|quarta|quinta|sexta|sabado|domingo)\b/);
+  if(w){let diff=(now.getDay()-WDAY_N.indexOf(w[1])+7)%7;if(diff===0)diff=7;return addDays(today,-diff);}
+  if(/mes passado/.test(t))return addMonths(today,-1);
+  return null;
+}
+function matchAccount(t){
+  const all=[...S().cards.map(c=>({...c,kind:'card'})),...S().accounts.map(a=>({...a,kind:'acc'}))],pad_=' '+t+' ';
+  let best=null,bl=0;
+  all.forEach(a=>{
+    const n=norm(a.name),toks=n.split(' ').filter(x=>x.length>=3);
+    const hit=pad_.includes(' '+n+' ')?n.length:Math.max(0,...toks.filter(x=>pad_.includes(' '+x+' ')).map(x=>x.length));
+    if(hit>bl){bl=hit;best=a;}
+  });
+  if(!best&&/\bcartao\b/.test(t)&&S().cards.length===1)best={...S().cards[0],kind:'card'};
+  return best;
+}
+const ACCENTS={farmacia:'farmácia',salario:'salário',cafe:'café',agua:'água',gas:'gás',pedagio:'pedágio',combustivel:'combustível',condominio:'condomínio',medico:'médico',tenis:'tênis',acougue:'açougue',almoco:'almoço',remedio:'remédio',ingles:'inglês',onibus:'ônibus',metro:'metrô',mae:'mãe',joao:'João',comissao:'comissão',decimo:'décimo',acai:'açaí',feijao:'feijão',pao:'pão',sacolao:'sacolão',cartao:'cartão',saude:'saúde',educacao:'educação',alimentacao:'alimentação'};
+function accentWord(w){
+  if(ACCENTS[w])return ACCENTS[w];
+  for(const t of state.tx){const hit=t.description.split(/\s+/).find(x=>norm(x)===w);if(hit)return hit.toLowerCase();}
+  return w;
+}
+const V_STOP=new Set(['de','do','da','dos','das','no','na','nos','nas','em','com','para','pro','pra','um','uma','o','a','os','as','meu','minha','por','que','foi','deu','e','ao','pelo','pela','la','aqui','mais']);
+const V_DROP=new Set([...V_ALL,'reais','real','conto','contos','pila','pilas','centavo','centavos','hoje','ontem','anteontem','amanha','dia','dias','semana','passada','passado','mes','este','esta','esse','essa','neste','nesta','pix','debito','credito','cartao','dinheiro','especie','boleto','transferencia','ted','doc','vezes','vez','parcelas','prestacoes','x','ultimo','proximo',...MONTH_N,...WDAY_N]);
+
+function parseSegment(t,ctx){
+  const verb=V_ALL.find(v=>new RegExp('\\b'+v+'\\b').test(t));
+  let type=ctx.type||'expense';
+  if(verb)type=V_INCOME.includes(verb)?'income':V_INVEST.includes(verb)?'investment':'expense';
+  else if(/\b(investimento|aporte)\b/.test(t))type='investment';
+  else if(/\b(receita|rendimento|dividendos?)\b/.test(t))type='income';
+  const pastVerb=verb?true:!!ctx.pastVerb,mre=MONTH_N.join('|');
+  const cands=amountsIn(t).map(c=>{
+    const after=t.slice(c.end),before=t.slice(0,c.i);
+    c.inst=/^\s*(?:x|vezes|vez|parcelas|prestacoes)\b/.test(after);
+    c.date=/\b(?:dia|dias)\s*$/.test(before)||new RegExp(`^\\s*de\\s+(?:${mre})\\b`).test(after);
+    c.misc=/^\s*(?:dias|horas|meses|anos|km|kg)\b/.test(after);
+    c.cents=/^\s*centavos?\b/.test(after);
+    c.cur=/\b(?:reais|real)\s*$/.test(before)||/^\s*(?:reais|real|conto|contos|pila|pilas)\b/.test(after);
+    return c;
+  });
+  const pool=cands.filter(c=>!c.inst&&!c.date&&!c.misc&&!c.cents),cents=cands.find(c=>c.cents),instC=cands.find(c=>c.inst);
+  let pick=pool.find(c=>c.cur)||[...pool].sort((a,b)=>b.v-a.v)[0],amount;
+  if(pick)amount=round2(pick.v+(cents?cents.v/100:0));else if(cents)amount=round2(cents.v/100);else return null;
+  if(!(amount>0))return null;
+  const installments=instC?clamp(Math.round(instC.v),2,48):0;
+  const dt=voiceDate(t,pastVerb);
+  let payment='';
+  if(/\bpix\b/.test(t))payment='Pix';else if(/\bdebito\b/.test(t))payment='Débito';else if(/\b(credito|cartao)\b/.test(t))payment='Crédito';
+  else if(/\b(dinheiro|especie)\b/.test(t))payment='Dinheiro';else if(/\bboleto\b/.test(t))payment='Boleto';else if(/\b(transferencia|ted|doc)\b/.test(t))payment='Transferência';
+  const acc=matchAccount(t);if(acc&&acc.kind==='card'&&!payment)payment='Crédito';
+  const accTok=acc?norm(acc.name).split(' '):[];
+  let words=t.split(' ').filter(w=>w&&!/^\d/.test(w)&&!V_DROP.has(w)&&!accTok.includes(w));
+  while(words.length&&V_STOP.has(words[0]))words.shift();
+  while(words.length&&V_STOP.has(words[words.length-1]))words.pop();
+  let desc=words.map(accentWord).join(' ');desc=desc.charAt(0).toUpperCase()+desc.slice(1);
+  let category=null;
+  for(const c of activeCats(type)){const n=norm(c);if(n!=='outros'&&(' '+t+' ').includes(' '+n+' '))category=c;}
+  if(!category)category=suggestCategory(desc,type)||suggestCategory(t.replace(/\bcartao\b/g,' '),type);
+  if(!category||!activeCats(type).includes(category))category=activeCats(type).includes('Outros')?'Outros':activeCats(type)[0];
+  return {type,amount,description:desc||(category!=='Outros'?category:'Lançamento por voz'),category,sug:category,date:dt||ctx.date||todayStr(),dateExplicit:!!dt,payment,accountId:acc?acc.id:'',installments,pastVerb};
+}
+function parseVoice(text){
+  const t=expandMil(numberWords(vnorm(text))),items=[];let ctx={};
+  splitSegments(t).forEach(s=>{const it=parseSegment(s,ctx);if(it){items.push(it);ctx={type:it.type,pastVerb:it.pastVerb,date:it.dateExplicit?it.date:null};}});
+  return items;
+}
+
+// --- perguntas por voz ("quanto gastei com alimentação este mês?")
+function isQuery(text){
+  const q=vnorm(text);
+  if(/\b(gastei|paguei|comprei|recebi|ganhei|investi|apliquei|parcelei)\b/.test(q))return false;
+  return /^(quanto|quantos|qual|quais|me diga|me diz|me mostra|mostra|mostre|saldo|total|onde|como)\b/.test(q)||/\bsaldo\b/.test(q);
+}
+function answerQuery(text){
+  const t=vnorm(text),today=todayStr(),curM=monthOf(today),plain=h=>h.replace(/<[^>]+>/g,'');
+  if(/\b(onde|como)\b.*\b(economizar|poupar|melhorar|cortar)\b/.test(t)){const h='Essa análise fica para o assistente do bloco C. Por enquanto, veja os insights na tela inicial.';return {html:h,speech:h};}
+  let from,to,label;const mi=MONTH_N.findIndex(m=>new RegExp('\\b'+m+'\\b').test(t));
+  if(/\bhoje\b/.test(t)){from=to=today;label='hoje';}
+  else if(/\bontem\b/.test(t)){from=to=addDays(today,-1);label='ontem';}
+  else if(/semana passada/.test(t)){from=addDays(today,-13);to=addDays(today,-7);label='na semana passada';}
+  else if(/\bsemana\b/.test(t)){from=addDays(today,-6);to=today;label='nos últimos 7 dias';}
+  else if(/mes passado/.test(t)){const m=prevMonth(curM),R=fmRange(m);from=R.start;to=R.end;label='em '+monthLabel(m);}
+  else if(mi>=0){const m=`${today.slice(0,4)}-${pad(mi+1)}`,R=fmRange(m);from=R.start;to=R.end;label='em '+monthLabel(m);}
+  else if(/\bano\b/.test(t)){from=today.slice(0,4)+'-01-01';to=today.slice(0,4)+'-12-31';label='neste ano';}
+  else{const R=fmRange(curM);from=R.start;to=R.end;label='em '+monthLabel(curM);}
+  const inR=state.tx.filter(x=>x.date>=from&&x.date<=to);
+  const done=h=>({html:h,speech:plain(h)});
+  if(/\bsaldo\b/.test(t)){const s=sums(inR),bal=s.income-s.expense-s.investment;return done(`Seu saldo ${label} é <b>${brl(bal)}</b>: receitas ${brl(s.income)}, despesas ${brl(s.expense)}${s.investment?`, investido ${brl(s.investment)}`:''}.`);}
+  let type='expense';
+  if(/\b(recebi|receita|receitas|ganhei|renda)\b/.test(t))type='income';else if(/\b(investi|investimento|investimentos|apliquei)\b/.test(t))type='investment';
+  const verb=type==='expense'?'gastou':type==='income'?'recebeu':'investiu';
+  if(/\bmaior\b/.test(t)){const big=inR.filter(x=>x.type===type).sort((a,b)=>b.amount-a.amount)[0];return done(big?`O maior lançamento ${label} foi <b>${esc(big.description)}</b>: ${brl(big.amount)} (${fmtDate(big.date)}).`:`Não encontrei lançamentos ${label}.`);}
+  let list=inR.filter(x=>x.type===type),catName=null,sub=null;
+  for(const c of catDefs(type).map(c=>c.name)){const n=norm(c);if(n!=='outros'&&(' '+t+' ').includes(' '+n+' '))catName=c;}
+  if(!catName){
+    const m=t.match(/\b(?:com|em|no|na|de|do|da)\s+([a-z0-9 ]+?)(?=\s+(?:este|esse|neste|nesse|hoje|ontem|semana|mes|ano|em|no|na)\b|$)/),after=m&&m[1];
+    if(after&&after.length>2&&!/^(este|esse|mes|ano|total)/.test(after)){
+      if(list.some(x=>norm(x.description).includes(after)))sub=after;else{const sug=suggestCategory(after,type);if(sug)catName=sug;}
+    }
+  }
+  if(catName)list=list.filter(x=>x.category===catName);
+  if(sub)list=list.filter(x=>norm(x.description).includes(sub));
+  const total=list.reduce((a,x)=>a+x.amount,0);
+  let h=`Você ${verb} <b>${brl(total)}</b>${catName?` em ${esc(catName)}`:sub?` com “${esc(sub)}”`:''} ${label} (${list.length} lançamento${list.length===1?'':'s'}).`;
+  if(!catName&&!sub&&type==='expense'&&list.length>1){
+    const ents=Object.entries(catTotals(list,'expense')).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    h+=`<div style="margin-top:10px">${ents.map(([c,v])=>`<div class="leg"><span class="grow">${esc(catInfo('expense',c)[0])} ${esc(c)}</span><b>${Math.round(v/total*100)}%</b><span class="muted">${brl(v)}</span></div><div class="bar" style="margin-bottom:6px"><i style="width:${Math.round(v/total*100)}%"></i></div>`).join('')}</div>`;
+  }
+  return {html:h,speech:plain(h.split('<div')[0])};
+}
+
+// --- reconhecimento de voz (Web Speech API)
+const VERR={
+ 'not-allowed':['Permissão do microfone negada','Toque no cadeado ao lado do endereço > Permissões (ou Configurações do site) > Microfone > Permitir. Depois recarregue a página e toque no microfone de novo.'],
+ 'service-not-allowed':['O navegador bloqueou o serviço de voz','O reconhecimento de voz só funciona em https e com o serviço de voz do navegador liberado. Se o site está dentro de outro app ou de outra página (iframe), abra o endereço direto no Chrome ou Safari.'],
+ 'no-speech':['Não ouvi nada','Fale logo depois de tocar no microfone, perto do aparelho. Se persistir, rode o teste em Ajustes › Voz e foto.'],
+ 'audio-capture':['Não encontrei um microfone','Veja se há um microfone conectado e se outro app não está usando. Nas configurações do sistema, confirme que o navegador pode usar o microfone.'],
+ 'network':['Sem conexão com o serviço de voz','O reconhecimento de voz do navegador usa a internet. Verifique sua conexão e tente de novo.'],
+ 'aborted':['A gravação foi interrompida','Toque no microfone para tentar de novo.'],
+ 'language-not-supported':['Idioma não suportado','Troque o idioma da voz em Ajustes › Voz e foto.'],
+ 'start-failed':['Não consegui iniciar o reconhecimento','Recarregue a página e tente de novo.']
+};
+function voiceSupport(){
+  const o=[];let framed=false;try{framed=window.top!==window.self;}catch{framed=true;}
+  if(!SR)o.push({k:'nosr',t:'Este navegador não tem reconhecimento de voz. Use Chrome, Edge ou Safari recente.'});
+  if(!isSecureContext)o.push({k:'insecure',t:'A página precisa abrir em https:// (ou localhost) para usar o microfone.'});
+  if(framed)o.push({k:'iframe',t:'O site está dentro de outra página (iframe), que costuma bloquear o microfone. Abra o endereço direto no navegador.'});
+  if(/FBAN|FBAV|Instagram|Line\/|MicroMessenger|; wv\)/i.test(navigator.userAgent))o.push({k:'inapp',t:'Você parece estar num navegador embutido de outro app (Instagram, WhatsApp etc.). Abra no Chrome ou Safari.'});
+  return o;
+}
+function listen({lang,onState,onInterim,onFinal,onError,maxMs=20000,noSpeechMs=8000,idleMs=2200}){
+  const r=new SR();r.lang=lang;r.interimResults=true;r.continuous=false;r.maxAlternatives=1;
+  let fin='',intr='',heard=false,over=false,err=null,idleT=null;const T=[];
+  const clearAll=()=>{T.forEach(clearTimeout);clearTimeout(idleT);};
+  const bump=()=>{clearTimeout(idleT);idleT=setTimeout(()=>{try{r.stop();}catch{}},idleMs);};
+  r.onstart=()=>{if(onState)onState('listening');};
+  r.onspeechstart=()=>{heard=true;if(onState)onState('talking');};
+  r.onspeechend=()=>{if(onState)onState('listening');};
+  r.onresult=e=>{heard=true;fin='';intr='';for(let i=0;i<e.results.length;i++){const x=e.results[i];if(x.isFinal)fin+=x[0].transcript;else intr+=x[0].transcript;}if(onInterim)onInterim(fin,intr);bump();};
+  r.onerror=e=>{err=e.error;};
+  r.onend=()=>{
+    if(over)return;over=true;clearAll();if(onState)onState('end');
+    const txt=(fin+' '+intr).trim();
+    if(txt&&(!err||err==='no-speech'||err==='aborted')){if(onFinal)onFinal(txt);}
+    else if(onError)onError(err||'no-speech');
+  };
+  T.push(setTimeout(()=>{if(!heard){err='no-speech';try{r.stop();}catch{}}},noSpeechMs));
+  T.push(setTimeout(()=>{try{r.stop();}catch{}},maxMs));
+  try{r.start();}catch(ex){over=true;clearAll();if(onError)onError('start-failed');return {stop(){},abort(){}};}
+  return {stop(){try{r.stop();}catch{}},abort(){over=true;clearAll();try{r.abort();}catch{}if(onState)onState('end');}};
+}
+function stopVoice(){if(VC){try{VC.abort();}catch{}VC=null;}}
+const elx=id=>document.getElementById(id);
+function speakThen(text,cb){
+  if(!('speechSynthesis' in window)){if(cb)cb();return;}
+  try{
+    speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang=S().media.voiceLang||'pt-BR';u.rate=1.02;
+    let done=false;const fin=()=>{if(!done){done=true;if(cb)cb();}};u.onend=fin;u.onerror=fin;setTimeout(fin,15000);speechSynthesis.speak(u);
+  }catch{if(cb)cb();}
+}
+const dateSpoken=d=>d===todayStr()?'hoje':d===addDays(todayStr(),-1)?'ontem':d===addDays(todayStr(),1)?'amanhã':'em '+fmtDate(d);
+function summaryText(items){
+  const T={income:'Receita',expense:'Despesa',investment:'Investimento'};
+  const one=it=>`${T[it.type]} de ${nf.format(it.amount)} em ${it.category}${it.description&&norm(it.description)!==norm(it.category)?', '+it.description:''}, ${dateSpoken(it.date)}${it.installments>1?`, em ${it.installments} vezes`:''}`;
+  return items.length===1?`${one(items[0])}. Confirmar?`:`${items.length} lançamentos. ${items.map(one).join('. ')}. Confirmar?`;
+}
+
+// --- tela de voz
+function openVoiceSheet(){
+  if(S().media.voice===false){toast('O lançamento por voz está desativado em Ajustes › Voz e foto.');return;}
+  const issues=voiceSupport();
+  openSheet(`<h3>🎙️ Lançar por voz</h3>
+   <p class="muted small" style="margin-top:0">Diga, por exemplo: “gastei 45 no mercado hoje no cartão”, “recebi 3 mil de salário dia 5” ou “parcelei um tênis de 300 em 3 vezes”. Vale mais de um lançamento por frase. Também respondo perguntas: “quanto gastei com alimentação este mês?”.</p>
+   ${issues.length?`<div class="notice">${issues.map(i=>esc(i.t)).join('<br>')}</div>`:''}
+   <div class="center"><button id="mic-btn" class="mic-big" data-action="v-toggle" aria-label="Começar a falar" ${SR?'':'disabled'}>🎙️</button></div>
+   <div id="v-wave" class="wave" aria-hidden="true">${Array.from({length:11},()=>'<i></i>').join('')}</div>
+   <div id="v-live" class="live" aria-live="polite"><span class="muted">${SR?'Toque no microfone e fale…':'Reconhecimento de voz indisponível aqui. Use o campo abaixo.'}</span></div>
+   <div id="v-err"></div><div id="v-result"></div>
+   <div class="field" style="margin-top:8px"><label for="v-text">Ou digite como falaria</label><div class="searchbar"><input id="v-text" class="input" placeholder="gastei 45 no mercado hoje" autocomplete="off"><button class="btn primary" data-action="v-text-go">OK</button></div></div>
+   <button class="btn ghost block" data-sheet-x="0">Fechar</button>`);
+}
+function vStart(){
+  stopVoice();
+  const live=elx('v-live'),wave=elx('v-wave'),mic=elx('mic-btn');if(!live||!SR)return;
+  elx('v-err').innerHTML='';elx('v-result').innerHTML='';
+  live.className='live';live.innerHTML='<span class="muted">Ouvindo… pode falar</span>';
+  mic.setAttribute('aria-label','Parar de gravar');
+  VC=listen({lang:S().media.voiceLang||'pt-BR',
+    onState:s=>{const m=elx('mic-btn'),w=elx('v-wave');if(!m||!w)return;m.classList.toggle('on',s!=='end');w.classList.toggle('on',s==='listening'||s==='talking');w.classList.toggle('talk',s==='talking');if(s==='end'){m.setAttribute('aria-label','Começar a falar');VC=null;}},
+    onInterim:(f,i)=>{const l=elx('v-live');if(l)l.innerHTML=`${esc(f)} <span class="interim">${esc(i)}</span>`;},
+    onFinal:txt=>{const l=elx('v-live');if(l){l.className='live final';l.textContent=txt;}handleVoiceText(txt);},
+    onError:showVoiceError});
+}
+function showVoiceError(code){
+  const box=elx('v-err');
+  const [t,h]=VERR[code]||['Erro de voz ('+code+')','Tente de novo ou use o campo de texto.'];
+  const extra=(code==='not-allowed'||code==='service-not-allowed')?voiceSupport().filter(i=>i.k!=='nosr').map(i=>`<br>• ${esc(i.t)}`).join(''):'';
+  if(box)box.innerHTML=`<div class="notice" role="alert"><b>${esc(t)}</b><br>${esc(h)}${extra}</div>`;else toast(t);
+  const l=elx('v-live');if(l)l.innerHTML='<span class="muted">Toque no microfone para tentar de novo, ou digite abaixo.</span>';
+}
+async function handleVoiceText(text){
+  text=String(text||'').trim();if(!text)return;
+  if(isQuery(text)){
+    const a=answerQuery(text),r=elx('v-result');
+    if(r)r.innerHTML=`<div class="ins">${a.html}</div>`;
+    if(S().media.speak&&!state.privacy&&a.speech)speakThen(a.speech);
+    return;
+  }
+  const items=parseVoice(text);
+  if(!items.length){const b=elx('v-err');if(b)b.innerHTML=`<div class="notice"><b>Não encontrei um valor.</b><br>Inclua o valor, por exemplo: “gastei 45 no mercado”. Entendi: “${esc(text)}”.</div>`;return;}
+  if(S().media.autoSave){await saveVoiceItems(items,true);return;}
+  openVoiceConfirm(items,text);
+}
+
+// --- confirmação editável
+const catOpts=(type,cur)=>{const n=[...activeCats(type)];if(cur&&!n.includes(cur))n.push(cur);return n.map(c=>`<option ${c===cur?'selected':''}>${esc(c)}</option>`).join('');};
+const PAYS=['','Pix','Dinheiro','Débito','Crédito','Boleto','Transferência','Outro'];
+function openVoiceConfirm(items,spoken){
+  vdraft={items:items.map(i=>({...i})),spoken};renderConfirm();
+  if(S().media.speak)speakThen(summaryText(vdraft.items),()=>{if(SR&&vdraft)vListenConfirm();});
+}
+function renderConfirm(){
+  const accs=[...S().accounts,...S().cards],n=vdraft.items.length;
+  openSheet(`<h3>Confirme ${n>1?n+' lançamentos':'o lançamento'}</h3><p class="muted small" style="margin-top:0">Você disse: “${esc(vdraft.spoken)}”. Corrija o que precisar.</p>
+  ${vdraft.items.map((it,i)=>`<div class="vitem"><div class="hd"><span>#${i+1}</span>${n>1?`<button class="mb" data-action="v-del" data-i="${i}" aria-label="Remover lançamento ${i+1}">✕</button>`:''}</div>
+   <div class="two"><div class="field"><label for="vc${i}-type">Tipo</label><select id="vc${i}-type" class="select">${[['expense','Despesa'],['income','Receita'],['investment','Investimento']].map(([v,l])=>`<option value="${v}" ${it.type===v?'selected':''}>${l}</option>`).join('')}</select></div>
+   <div class="field"><label for="vc${i}-amount">${it.installments>1?'Valor total':'Valor'}</label><input id="vc${i}-amount" class="input" inputmode="decimal" value="${String(it.amount).replace('.',',')}"></div></div>
+   <div class="field"><label for="vc${i}-desc">Descrição</label><input id="vc${i}-desc" class="input" value="${esc(it.description)}"></div>
+   <div class="two"><div class="field"><label for="vc${i}-cat">Categoria</label><select id="vc${i}-cat" class="select">${catOpts(it.type,it.category)}</select></div>
+   <div class="field"><label for="vc${i}-date">Data</label><input id="vc${i}-date" class="input" type="date" value="${esc(it.date)}"></div></div>
+   <div class="two"><div class="field"><label for="vc${i}-pay">Pagamento</label><select id="vc${i}-pay" class="select">${PAYS.map(p=>`<option value="${p}" ${it.payment===p?'selected':''}>${p||'—'}</option>`).join('')}</select></div>
+   ${accs.length?`<div class="field"><label for="vc${i}-acc">Conta / cartão</label><select id="vc${i}-acc" class="select"><option value="">—</option>${accs.map(a=>`<option value="${esc(a.id)}" ${it.accountId===a.id?'selected':''}>${a.limit!=null?'💳':'🏦'} ${esc(a.name)}</option>`).join('')}</select></div>`:'<div></div>'}</div>
+   ${it.installments>1?`<div class="field"><label for="vc${i}-inst">Parcelas</label><input id="vc${i}-inst" class="input" type="number" min="1" max="48" value="${it.installments}"></div>`:''}</div>`).join('')}
+  <p id="vc-err" class="err" role="alert"></p>
+  <button class="btn primary block" data-action="v-save">✓ Confirmar${n>1?' '+n+' lançamentos':''}</button>
+  <div class="two" style="margin-top:10px"><button class="btn ghost" data-action="v-say">🎙️ Dizer “confirmar”</button><button class="btn ghost" data-action="v-again">Falar de novo</button></div>
+  <button class="btn ghost block" style="margin-top:10px" data-sheet-x="0">Cancelar</button>`);
+}
+function collectDraft(){
+  vdraft.items.forEach((it,i)=>{
+    const g=k=>elx(`vc${i}-${k}`);if(!g('type'))return;
+    it.type=g('type').value;it.amount=parseMoney(g('amount').value);it.description=g('desc').value.trim();it.category=g('cat').value;it.date=g('date').value;it.payment=g('pay').value;it.accountId=g('acc')?g('acc').value:'';
+    if(g('inst'))it.installments=intVal(g('inst').value,1,48,it.installments||1);
+  });
+}
+fieldHandlers.push((e,t)=>{
+  if(e.type!=='change'||!vdraft)return;
+  const m=/^vc(\d+)-type$/.exec(t.id||'');if(!m)return;
+  collectDraft();const it=vdraft.items[+m[1]],sug=suggestCategory(it.description,it.type);
+  it.category=sug&&activeCats(it.type).includes(sug)?sug:(activeCats(it.type).includes('Outros')?'Outros':activeCats(it.type)[0]);it.sug=it.category;renderConfirm();
+});
+fieldHandlers.push((e,t)=>{if(e.key==='Enter'||e.type!=='change')return;});
+function vListenConfirm(){
+  if(!SR)return;stopVoice();toast('🎙️ Diga “confirmar” ou “cancelar”');
+  VC=listen({lang:S().media.voiceLang||'pt-BR',maxMs:9000,noSpeechMs:7000,idleMs:1500,
+    onFinal:txt=>{
+      VC=null;const c=vnorm(txt);
+      if(/\b(confirmar|confirma|confirmo|sim|salvar|salva|pode salvar|ok|isso|certo|positivo)\b/.test(c))actions['v-save']({});
+      else if(/\b(cancelar|cancela|nao|deixa|esquece|negativo)\b/.test(c))closeSheet();
+      else toast(`Não entendi “${txt}”. Toque em Confirmar ou diga “confirmar”.`);
+    },
+    onError:code=>{VC=null;toast((VERR[code]||['Erro de voz'])[0]);}});
+}
+async function saveVoiceItems(items,auto){
+  const today=todayStr(),list=[];
+  items.forEach(it=>{
+    const base={userId:state.user.uid,date:it.date,type:it.type,category:it.category,amount:it.amount,description:it.description||it.category,status:it.date>today?'pending':'paid',payment:it.payment||undefined,accountId:it.accountId||undefined,tags:[],via:'voz',createdAt:new Date().toISOString()};
+    if(it.installments>1){
+      const n=it.installments,gid=uid(),per=Math.floor(it.amount/n*100)/100;
+      for(let k=0;k<n;k++){const d=addMonths(it.date,k),a=k===n-1?round2(it.amount-per*(n-1)):per;list.push({...base,date:d,amount:a,description:`${base.description} (${k+1}/${n})`,status:d>today?'pending':'paid',groupId:gid,installment:{n:k+1,of:n}});}
+    }else list.push(base);
+    if(!auto&&it.sug&&it.sug!==it.category&&it.description)learnRule(it.description,it.category,it.type);
+  });
+  let created=[];
+  const ok=await safe(async()=>{created=await DB.addTx(list);});
+  if(!ok)return;
+  closeSheet();render();
+  toast(`${items.length} lançamento${items.length>1?'s':''} criado${items.length>1?'s':''} ✓`,'Desfazer',()=>safe(async()=>{await DB.delTx(created.map(x=>x.id));render();}));
+  hooks.afterSave.forEach(f=>{try{f(list);}catch(e){console.error(e);}});
+}
+
+// --- autoteste de voz (Ajustes › Voz e foto)
+async function runVoiceTest(){
+  const run=++VT.run;
+  const L=[['support','Suporte do navegador'],['secure','Contexto seguro e janela'],['perm','Permissão do microfone'],['audio','Captação de áudio'],['recog','Reconhecimento de voz'],['parse','Interpretação das frases']];
+  const res={};L.forEach(([k])=>res[k]={s:'wait',m:'',h:''});
+  const alive=()=>run===VT.run&&!!elx('vt-list');
+  const draw=()=>{
+    const el=elx('vt-list');if(!el)return false;
+    el.innerHTML=L.map(([k,l])=>{const r=res[k],ic={wait:'⚪',run:'⏳',ok:'✅',bad:'❌',info:'ℹ️'}[r.s];return `<li><span class="st">${ic}</span><span><b>${l}</b>${r.m?`<small>${esc(r.m)}</small>`:''}${r.h?`<small>👉 ${esc(r.h)}</small>`:''}${k==='audio'&&r.s==='run'?'<div class="meter"><i id="vt-meter"></i></div>':''}</span></li>`;}).join('');
+    return true;
+  };
+  const set=(k,s,m,h)=>{res[k]={s,m:m||'',h:h||''};return draw();};
+  openSheet(`<h3>🎙️ Teste de voz</h3><p class="muted small" style="margin-top:0">Vou checar cada etapa. Quando eu pedir, fale perto do aparelho.</p><ul class="steps" id="vt-list"></ul><div id="vt-final" style="margin-top:14px"></div>`);
+  VT.run=run;draw();
+  const finish=()=>{
+    if(!alive())return;
+    const bad=L.filter(([k])=>res[k].s==='bad').length;
+    elx('vt-final').innerHTML=`<div class="${bad?'notice':'ins ok'}" role="status"><b>${bad?`${bad} etapa(s) com problema.`:'Tudo certo! A voz está pronta para uso.'}</b>${bad?'<br>Siga as dicas “👉” acima e repita o teste.':''}</div><div class="two" style="margin-top:10px"><button class="btn primary" data-action="test-voice">Repetir teste</button><button class="btn ghost" data-sheet-x="0">Fechar</button></div>`;
+  };
+  // 1 suporte
+  set('support','run');await new Promise(r=>setTimeout(r,250));if(!alive())return;
+  const hasSR=!!SR;
+  set('support',hasSR?'ok':'bad',hasSR?'Reconhecimento de voz disponível neste navegador.':'Este navegador não tem reconhecimento de voz.',hasSR?'':'Use Chrome, Edge ou Safari recente. Você ainda pode digitar a frase na tela de voz.');
+  // 2 contexto
+  const iss=voiceSupport().filter(i=>i.k!=='nosr');
+  set('secure',iss.length?'bad':'ok',iss.length?iss.map(i=>i.t).join(' '):'Página em https, fora de iframe e fora de navegador embutido.',iss.length?'Abra o endereço https do site direto no Chrome ou Safari.':'');
+  if(!alive())return;
+  // 3 permissão
+  set('perm','run');let permState='unknown';
+  try{if(navigator.permissions&&navigator.permissions.query)permState=(await navigator.permissions.query({name:'microphone'})).state;}catch{}
+  if(!alive())return;
+  if(permState==='denied')set('perm','bad','O microfone está bloqueado para este site.',VERR['not-allowed'][1]);
+  else if(permState==='granted')set('perm','ok','Permissão já concedida.');
+  else set('perm','info',permState==='prompt'?'Ainda não concedida: o navegador vai perguntar agora. Toque em Permitir.':'Este navegador não informa o estado; vou testar na prática.');
+  // 4 áudio
+  let audioOk=false;
+  if(permState==='denied'||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    set('audio','bad',!navigator.mediaDevices?'O navegador não liberou acesso ao microfone (página insegura ou embutida).':'Pulado: permissão bloqueada.','Libere o microfone nas permissões do site e repita o teste.');
+  }else{
+    set('audio','run','Abrindo o microfone… fale algo por 3 segundos (ex.: “um, dois, três, testando”).');
+    let stream=null,peak=0;
+    try{
+      stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      const AC=window.AudioContext||window.webkitAudioContext,ac=new AC();await ac.resume();
+      const src=ac.createMediaStreamSource(stream),an=ac.createAnalyser();an.fftSize=512;src.connect(an);
+      const buf=new Uint8Array(an.fftSize),t0=performance.now();
+      while(performance.now()-t0<3000&&alive()){an.getByteTimeDomainData(buf);let s=0;for(const v of buf){const d=(v-128)/128;s+=d*d;}const rms=Math.sqrt(s/buf.length);peak=Math.max(peak,rms);const m=elx('vt-meter');if(m)m.style.width=Math.min(100,rms*500)+'%';await new Promise(r=>setTimeout(r,60));}
+      try{ac.close();}catch{}
+    }catch(e){
+      const n=e&&e.name;
+      if(stream)stream.getTracks().forEach(t=>t.stop());
+      if(!alive())return;
+      set('audio','bad',n==='NotAllowedError'?'O navegador negou o microfone.':n==='NotFoundError'?'Nenhum microfone encontrado.':n==='NotReadableError'?'O microfone está em uso por outro app.':`Não consegui abrir o microfone (${n||'erro'}).`,n==='NotAllowedError'?VERR['not-allowed'][1]:'Feche outros apps que usam o microfone e confira as permissões do sistema.');
+      stream=null;
+    }
+    if(stream){stream.getTracks().forEach(t=>t.stop());if(!alive())return;audioOk=peak>0.015;set('audio',audioOk?'ok':'bad',audioOk?`Captei sinal de áudio (pico ${Math.round(peak*100)}%).`:'O microfone abriu, mas não captei som.',audioOk?'':'Veja se não está mudo e se o microfone certo está selecionado; fale mais perto.');}
+  }
+  if(!alive())return;
+  // 5 reconhecimento
+  let heard=null;
+  if(!hasSR)set('recog','bad','Pulado: sem suporte no navegador.');
+  else if(res.audio.s==='bad'&&/negou|bloque|Nenhum|uso/.test(res.audio.m))set('recog','bad','Pulado: o microfone não está acessível.');
+  else{
+    await new Promise(r=>setTimeout(r,400));if(!alive())return;
+    set('recog','run','Agora diga: “gastei quarenta e cinco reais no mercado hoje”.');
+    const out=await new Promise(resolve=>{VC=listen({lang:S().media.voiceLang||'pt-BR',maxMs:12000,noSpeechMs:9000,idleMs:1800,onInterim:(f,i)=>{if(alive())set('recog','run','Ouvindo: '+(f+' '+i).trim(),'Diga: “gastei quarenta e cinco reais no mercado hoje”');},onFinal:txt=>resolve({txt}),onError:code=>resolve({err:code})});});
+    VC=null;if(!alive())return;
+    if(out.txt){heard=out.txt;set('recog','ok',`Entendi: “${out.txt}”.`);}
+    else{const [t,h]=VERR[out.err]||['Erro de voz ('+out.err+')',''];set('recog','bad',t+'.',h);}
+  }
+  // 6 interpretação
+  const cases=[['gastei 45 reais no mercado hoje no cartão',x=>x.amount===45&&x.type==='expense'],['recebi três mil de salário dia 5',x=>x.amount===3000&&x.type==='income'],['paguei cento e vinte de luz ontem',x=>x.amount===120],['parcelei um tênis de 300 em 3 vezes',x=>x.amount===300&&x.installments===3],['gastei 30 na farmácia e 12 e meio no café',x=>true]];
+  let okN=0;const fails=[];
+  cases.forEach(([f,chk],i)=>{try{const r=parseVoice(f);const pass=i===4?(r.length===2&&r[0].amount===30&&r[1].amount===12.5):(r.length>=1&&chk(r[0]));if(pass)okN++;else fails.push(f);}catch{fails.push(f);}});
+  let extra='';if(heard){const r=parseVoice(heard);extra=r.length?` Sua frase virou: ${r.map(x=>`${nf.format(x.amount)} em ${x.category}`).join(' + ')}.`:' Sua frase não gerou lançamento (faltou valor?).';}
+  set('parse',fails.length?'bad':'ok',`${okN}/${cases.length} frases de exemplo interpretadas corretamente.${extra}`,fails.length?'Não interpretei: '+fails.join(' | '):'');
+  finish();
+}
+
+Object.assign(actions,{
+  'fab-voice'(){toggleFab(false);openVoiceSheet();},
+  'v-toggle'(){if(VC){VC.stop();return;}vStart();},
+  'v-text-go'(){const v=($('#v-text')||{}).value;if(v&&v.trim())handleVoiceText(v);},
+  'v-del'(el){collectDraft();vdraft.items.splice(+el.dataset.i,1);if(!vdraft.items.length)closeSheet();else renderConfirm();},
+  'v-save'(el){
+    if(!vdraft)return;collectDraft();const err=elx('vc-err');
+    for(const it of vdraft.items){
+      if(isNaN(it.amount)||it.amount<=0){if(err)err.textContent='Informe um valor maior que zero em todos os lançamentos.';return;}
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(it.date)){if(err)err.textContent='Informe uma data válida em todos os lançamentos.';return;}
+    }
+    if(el&&el.disabled!==undefined)el.disabled=true;
+    saveVoiceItems(vdraft.items,false).then(()=>{if(el&&el.disabled!==undefined)el.disabled=false;});
+  },
+  'v-say'(){vListenConfirm();},
+  'v-again'(){closeSheet();openVoiceSheet();vStart();},
+  'test-voice'(){runVoiceTest();}
+});
+
+/*@@B3@@*/
+/*@@B4@@*/
 boot();
 </script>
 </body>
