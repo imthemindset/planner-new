@@ -1388,8 +1388,8 @@ Object.assign(actions,{
   'cat-edit'(el){openCatForm(+el.dataset.i);},
   'cat-up'(el){ensureCats();const l=S().categories[catType],i=+el.dataset.i;if(i>0){[l[i-1],l[i]]=[l[i],l[i-1]];saveSettings(false);render();}},
   'cat-down'(el){ensureCats();const l=S().categories[catType],i=+el.dataset.i;if(i<l.length-1){[l[i+1],l[i]]=[l[i],l[i+1]];saveSettings(false);render();}},
-  'cat-ico'(el){catDraft.icon=el.dataset.v;$('#cf-ico').value=el.dataset.v;$$('.emojis button').forEach(b=>b.classList.toggle('on',b===el));},
-  'cat-col'(el){catDraft.color=el.dataset.v;$$('.swatch').forEach(b=>b.classList.toggle('on',b===el));},
+  'cat-ico'(el){catDraft.icon=el.dataset.v;$('#cf-ico').value=el.dataset.v;$('.emojis button').forEach(b=>b.classList.toggle('on',b===el));},
+  'cat-col'(el){catDraft.color=el.dataset.v;$('.swatch').forEach(b=>b.classList.toggle('on',b===el));},
   async 'cat-save'(){
     const name=$('#cf-name').value.trim(),err=$('#cf-err');
     if(!name){err.textContent='Dê um nome para a categoria.';return;}
@@ -2099,8 +2099,382 @@ Object.assign(actions,{
   'test-voice'(){runVoiceTest();}
 });
 
-/*@@B3@@*/
-/*@@B4@@*/
+/* =====================================================================
+   17. FOTO (bloco B): compressão, leitura (IA ou OCR), interpretação e anexo
+   ===================================================================== */
+async function loadImage(file){ // respeita a orientação EXIF da câmera
+  if(window.createImageBitmap){try{return await createImageBitmap(file,{imageOrientation:'from-image'});}catch{}}
+  return new Promise((res,rej)=>{const url=URL.createObjectURL(file),im=new Image();im.onload=()=>{URL.revokeObjectURL(url);res(im);};im.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('decode'));};im.src=url;});
+}
+async function compress(file,maxSide,q){
+  const im=await loadImage(file),w0=im.width||im.naturalWidth,h0=im.height||im.naturalHeight;
+  if(!w0||!h0)throw new Error('decode');
+  const k=Math.min(1,maxSide/Math.max(w0,h0)),w=Math.max(1,Math.round(w0*k)),h=Math.max(1,Math.round(h0*k));
+  const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(im,0,0,w,h);
+  if(im.close)im.close();
+  return {canvas:c,dataUrl:c.toDataURL('image/jpeg',q),w,h};
+}
+function downscale(canvas,maxSide,q){
+  const k=Math.min(1,maxSide/Math.max(canvas.width,canvas.height)),w=Math.round(canvas.width*k),h=Math.round(canvas.height*k),c=document.createElement('canvas');
+  c.width=w;c.height=h;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(canvas,0,0,w,h);return c.toDataURL('image/jpeg',q);
+}
+function enhance(canvas){ // tons de cinza + contraste: ajuda o OCR
+  const c=document.createElement('canvas');c.width=canvas.width;c.height=canvas.height;const x=c.getContext('2d');x.drawImage(canvas,0,0);
+  const d=x.getImageData(0,0,c.width,c.height),p=d.data;
+  for(let i=0;i<p.length;i+=4){const g=clamp((.299*p[i]+.587*p[i+1]+.114*p[i+2]-128)*1.35+136,0,255);p[i]=p[i+1]=p[i+2]=g;}
+  x.putImageData(d,0,0);return c;
+}
+
+// Comprovantes ficam numa coleção própria (receipts/{id do lançamento}), para não pesar a lista de lançamentos.
+const _execB=exec;
+exec=async function(op){
+  if(op.t==='rcset')return F.setDoc(F.doc(fb.db,'receipts',op.id),op.data);
+  if(op.t==='rcdel')return F.deleteDoc(F.doc(fb.db,'receipts',op.id));
+  return _execB(op);
+};
+const RC={
+  async save(id,dataUrl){
+    if(state.mode==='firebase'){await run({t:'rcset',id,data:{userId:state.user.uid,data:dataUrl,createdAt:new Date().toISOString()}});return;}
+    store.set('pf_rc_'+id,dataUrl);
+  },
+  async get(id){
+    if(state.mode==='firebase'){const snap=await withTimeout(F.getDoc(F.doc(fb.db,'receipts',id)),9000);return snap.exists()?snap.data().data:null;}
+    return store.get('pf_rc_'+id,null);
+  },
+  async del(id){if(state.mode==='firebase')await run({t:'rcdel',id});else store.del('pf_rc_'+id);}
+};
+const RECEIPTS_RULE='match /receipts/{rid} {\n  allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;\n  allow read, update, delete: if request.auth != null && resource.data.userId == request.auth.uid;\n}';
+
+// Leitura por IA: só quando o app roda dentro do Claude (sem chave, sem servidor). Em hospedagem estática usamos OCR.
+const aiAvailable=()=>/(^|\.)claude(usercontent)?\.(ai|com)$/i.test(location.hostname);
+function normalizeRead(o,src){
+  if(!o||typeof o!=='object')return null;
+  let amount=typeof o.amount==='string'?parseMoney(o.amount):Number(o.amount);
+  if(!(amount>0)||amount>1e7)amount=null;
+  let date=/^\d{4}-\d{2}-\d{2}$/.test(String(o.date||''))?o.date:null;
+  if(date&&(date>addDays(todayStr(),1)||date<addYears(todayStr(),-3)))date=null;
+  const type=o.type==='income'?'income':'expense';
+  return {amount,date,merchant:o.merchant?String(o.merchant).trim().slice(0,60):'',payment:PAYS.includes(o.payment)?o.payment:'',type,category:activeCats(type).includes(o.category)?o.category:null,src};
+}
+async function aiRead(dataUrl){
+  const ctrl=new AbortController(),tm=setTimeout(()=>ctrl.abort(),25000);
+  try{
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},signal:ctrl.signal,body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,messages:[{role:'user',content:[
+      {type:'image',source:{type:'base64',media_type:'image/jpeg',data:dataUrl.split(',')[1]}},
+      {type:'text',text:`Leia este comprovante, nota, cupom ou print de Pix brasileiro e responda SOMENTE com JSON, sem markdown: {"amount":número ou null,"date":"AAAA-MM-DD" ou null,"merchant":"estabelecimento ou favorecido" ou null,"payment":"Pix|Débito|Crédito|Dinheiro|Boleto|Transferência" ou null,"type":"expense ou income","category":"uma de: ${activeCats('expense').join(', ')}" ou null}. Hoje é ${todayStr()}.`}]}]})});
+    if(!r.ok)throw new Error('http '+r.status);
+    const j=await r.json(),txt=(j.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
+    return normalizeRead(JSON.parse(txt.replace(/```json|```/g,'').trim()),'ia');
+  }finally{clearTimeout(tm);}
+}
+
+// Plano B: OCR no navegador (Tesseract.js via jsDelivr)
+let tessP=null;
+function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=()=>rej(new Error('script'));document.head.appendChild(s);});}
+function ensureTesseract(){
+  if(window.Tesseract)return Promise.resolve(window.Tesseract);
+  if(!tessP)tessP=withTimeout(loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js'),20000).then(()=>window.Tesseract).catch(e=>{tessP=null;throw e;});
+  return tessP;
+}
+async function ocr(canvas,onProgress){
+  const T=await ensureTesseract();let last;
+  for(const langPath of ['https://cdn.jsdelivr.net/npm/@tesseract.js-data/por/4.0.0_best_int',null]){
+    try{
+      const opts={logger:m=>{if(m.status==='recognizing text'&&onProgress)onProgress(m.progress);}};
+      if(langPath)opts.langPath=langPath;
+      const res=await withTimeout(T.recognize(canvas,'por',opts),90000);
+      return {text:res.data.text||'',conf:res.data.confidence||0};
+    }catch(e){last=e;}
+  }
+  throw last;
+}
+const RCP_KW={'Alimentação':['atacadao','assai','carrefour','pao de acucar','hortifruti','restaurante','lanchonete','padaria','supermercado','mercado','acougue'],'Transporte':['posto','combustivel','gasolina','etanol','diesel','estacionamento','pedagio'],'Saúde':['drogaria','farmacia','clinica','laboratorio','hospital','odontologia'],'Lazer':['cinema','ingresso','hotel'],'Educação':['livraria','escola','curso','papelaria'],'Moradia':['energia','saneamento','condominio','internet']};
+function parseReceipt(text){
+  const raw=String(text||''),lines=raw.split(/\r?\n/).map(s=>s.trim()).filter(Boolean),t=norm(raw),today=todayStr();
+  // valor: prioriza linhas com “total / valor a pagar / valor pago”
+  const vals=[];
+  lines.forEach((ln,li)=>{const re=/(\d{1,3}(?:\.\d{3})+|\d+)[,.](\d{2})(?!\d)/g,nl=norm(ln);let m;while((m=re.exec(ln))){const v=parseFloat(m[1].replace(/\./g,'')+'.'+m[2]);if(v>0&&v<1e7)vals.push({v,li,nl});}});
+  const KEYS=['valor total','total a pagar','valor a pagar','total geral','valor pago','valor da transacao','valor do pagamento','total','valor','pago'],BAD=/subtotal|troco|desconto|tribut|imposto|recebido|entregue|icms|pis|cofins/;
+  let amount=null;
+  for(const key of KEYS){
+    const idx=lines.map((l,i)=>norm(l).includes(key)&&!BAD.test(norm(l))?i:-1).filter(i=>i>=0);
+    const c=vals.filter(x=>idx.includes(x.li)||idx.includes(x.li-1));
+    if(c.length){amount=Math.max(...c.map(x=>x.v));break;}
+  }
+  if(amount==null){const f=vals.filter(x=>!BAD.test(x.nl));if(f.length)amount=Math.max(...f.map(x=>x.v));}
+  // data
+  const MAB={jan:1,fev:2,mar:3,abr:4,mai:5,jun:6,jul:7,ago:8,set:9,out:10,nov:11,dez:12},dates=[];
+  lines.forEach((ln,li)=>{
+    let m;const re=/\b(\d{2})[\/\-.](\d{2})[\/\-.](\d{4}|\d{2})\b/g;
+    while((m=re.exec(ln))){let y=+m[3];if(y<100)y+=2000;dates.push({s:`${y}-${m[2]}-${m[1]}`,li});}
+    const re2=/\b(\d{1,2}) (?:de )?(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-z]* (?:de )?(\d{4})\b/g,nl=norm(ln);
+    while((m=re2.exec(nl)))dates.push({s:`${m[3]}-${pad(MAB[m[2]])}-${pad(+m[1])}`,li});
+  });
+  const okDate=s=>/^\d{4}-\d{2}-\d{2}$/.test(s)&&+s.slice(5,7)>=1&&+s.slice(5,7)<=12&&+s.slice(8)>=1&&+s.slice(8)<=31&&s<=addDays(today,1)&&s>=addYears(today,-3);
+  const valid=dates.filter(d=>okDate(d.s)).sort((a,b)=>(/data|emissao|pagamento|realizad|efetivad/.test(norm(lines[b.li]))?1:0)-(/data|emissao|pagamento|realizad|efetivad/.test(norm(lines[a.li]))?1:0));
+  const date=valid.length?valid[0].s:null;
+  // estabelecimento: favorecido do Pix ou primeira linha “de nome” do cupom
+  let merchant='';
+  const pi=lines.findIndex(l=>/^(para|destino|favorecido|recebedor|beneficiario|nome do recebedor|quem recebeu)\b/.test(norm(l)));
+  if(pi>=0){const after=lines[pi].split(/[:\-]/).slice(1).join(' ').trim();merchant=after.length>2?after:(lines[pi+1]||'');}
+  if(!merchant){
+    const skip=/cnpj|cpf|cupom|nota|danfe|documento|inscri|rua |avenida|^av\b|tel|fone|www|http|consumidor|data|hora|total|valor|comprovante|^\d/;
+    merchant=lines.slice(0,8).find(l=>{const letters=(l.match(/[A-Za-zÀ-ÿ]/g)||[]).length;return letters>=4&&letters/l.length>.6&&!skip.test(norm(l));})||'';
+  }
+  merchant=merchant.replace(/[^A-Za-zÀ-ÿ0-9 &'.\-]/g,' ').replace(/\s+/g,' ').trim().slice(0,50).toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase());
+  let payment='';
+  if(/\bpix\b/.test(t))payment='Pix';else if(/cartao de credito|credito|visa|master/.test(t))payment='Crédito';else if(/debito/.test(t))payment='Débito';
+  else if(/\bdinheiro\b/.test(t))payment='Dinheiro';else if(/boleto/.test(t))payment='Boleto';else if(/transferencia|\bted\b/.test(t))payment='Transferência';
+  const type=/voce recebeu|pix recebido|recebido de|transferencia recebida|credito em conta/.test(t)?'income':'expense';
+  let category=suggestCategory(merchant,type);
+  if(!category)for(const [c,ws] of Object.entries(RCP_KW))if(ws.some(w=>t.includes(w))){category=c;break;}
+  if(category&&!activeCats(type).includes(category))category=null;
+  return {amount,date,merchant,payment,type,category,src:'ocr'};
+}
+const READ_MSG={
+  blur:'A imagem parece borrada ou sem texto legível. Tente de novo com mais luz, segurando firme e enquadrando só o comprovante.',
+  noamount:'Consegui ler o texto, mas não encontrei o valor. Confira a foto e preencha o valor.',
+  offline:'Sem internet para carregar o leitor (só é preciso na primeira vez). Preencha manualmente: a foto fica anexada.',
+  ocr:'O leitor não conseguiu processar esta imagem. Preencha manualmente: a foto fica anexada.',
+  decode:'Não consegui abrir esta imagem. Tente um JPG ou PNG.',
+  ai:'A leitura por IA não respondeu. Preencha manualmente: a foto fica anexada.'
+};
+async function readReceipt(big,onStep){
+  let result=null,text='';
+  if(aiAvailable()){
+    onStep('Lendo o comprovante com IA…');
+    try{result=await aiRead(big.canvas.toDataURL('image/jpeg',.8));}catch(e){console.warn('IA indisponível',e);}
+    if(result&&result.amount)return {result,reason:null,text};
+  }
+  onStep('Preparando o leitor OCR… (na primeira vez baixa alguns MB)');
+  try{
+    if(!navigator.onLine)throw Object.assign(new Error('offline'),{code:'unavailable'});
+    const o=await ocr(enhance(big.canvas),p=>onStep('Lendo o comprovante… '+Math.round(p*100)+'%',p));
+    text=o.text;
+    if(text.replace(/\s/g,'').length<12||o.conf<30)return {result:null,reason:'blur',text};
+    const r=parseReceipt(text);
+    return {result:r,reason:r.amount?null:'noamount',text};
+  }catch(e){
+    console.warn('OCR',e);
+    return {result:null,reason:(isNet(e)||/script|timeout|offline|fetch|network/i.test(e.message||''))?'offline':'ocr',text};
+  }
+}
+/* ---------- Tela de foto: escolher/tirar, ler, confirmar e salvar ---------- */
+let pdraft=null;
+const _closeSheetC=closeSheet;
+closeSheet=function(v=false){pdraft=null;return _closeSheetC(v);};
+
+function openPhotoSheet(){
+  if(S().media.photo===false){toast('A leitura de foto está desativada em Ajustes › Voz e foto.');return;}
+  openSheet(`<h3>📷 Lançar por foto</h3>
+   <p class="muted small" style="margin-top:0">Fotografe um comprovante, nota, cupom ou print de Pix. Eu leio valor, data, estabelecimento e forma de pagamento, e você confirma antes de salvar.</p>
+   <div class="two"><label class="btn primary" for="ph-cam" style="cursor:pointer">📸 Tirar foto</label><label class="btn ghost" for="ph-gal" style="cursor:pointer">🖼️ Escolher da galeria</label></div>
+   <input id="ph-cam" type="file" accept="image/*" capture="environment" class="hidden">
+   <input id="ph-gal" type="file" accept="image/*" class="hidden">
+   <div id="ph-status" style="margin-top:14px"></div>
+   <p class="muted small">${aiAvailable()?'Leitura por IA disponível neste ambiente, com OCR como plano B.':'Em hospedagem estática não há como usar IA com segurança (exigiria uma chave num servidor), então a leitura é feita por OCR no próprio navegador: a foto não sai do aparelho.'}</p>
+   <button class="btn ghost block" data-action="ph-manual">Preencher manualmente</button>`);
+}
+function mkDraft(r,photo,reason){
+  const type=(r&&r.type)||'expense';
+  let cat=(r&&r.category)||suggestCategory((r&&r.merchant)||'',type);
+  if(!cat||!activeCats(type).includes(cat))cat=activeCats(type).includes('Outros')?'Outros':activeCats(type)[0];
+  return {photo,reason:reason||null,src:r?r.src:null,sug:cat,type,amount:r&&r.amount?r.amount:'',description:(r&&r.merchant)||'',category:cat,date:(r&&r.date)||todayStr(),payment:(r&&r.payment)||'',accountId:'',attach:true};
+}
+async function processPhoto(file){
+  const show=h=>{const e=elx('ph-status');if(e)e.innerHTML=h;};
+  const step=(t,p)=>show(`<div class="small"><b>${esc(t)}</b></div><div class="bar" style="margin-top:8px"><i style="width:${p!=null?Math.round(p*100):35}%"></i></div>`);
+  const run=++VT.run,alive=()=>run===VT.run&&!!elx('ph-status');
+  step('Reduzindo a imagem…');
+  let big;
+  try{big=await compress(file,1600,.85);}catch(e){console.warn(e);show(`<div class="notice" role="alert">${esc(READ_MSG.decode)}</div>`);return;}
+  if(!alive())return;
+  const photo=downscale(big.canvas,1000,.62);
+  const {result,reason}=await readReceipt(big,(t,p)=>{if(alive())step(t,p);});
+  if(!alive())return;
+  const d=mkDraft(result,photo,reason);
+  if(S().media.autoSave&&result&&result.amount){await savePhotoDraft(d,true);return;}
+  openPhotoConfirm(d);
+}
+function openPhotoConfirm(d){
+  pdraft=d;const accs=[...S().accounts,...S().cards];
+  openSheet(`<h3>Confira o comprovante</h3><img class="thumb" src="${esc(d.photo)}" alt="Foto do comprovante">
+   ${d.src?`<div class="ins ok"><span aria-hidden="true">✅</span><span>${d.src==='ia'?'Lido por IA':'Lido por OCR no navegador'}. Confira os campos antes de salvar.</span></div>`:`<div class="notice" role="alert">${esc(READ_MSG[d.reason]||'Não consegui ler automaticamente. Preencha os campos: a foto fica anexada.')}</div>`}
+   ${d.src&&!d.amount?`<div class="notice">${esc(READ_MSG.noamount)}</div>`:''}
+   <div class="two"><div class="field"><label for="pc-type">Tipo</label><select id="pc-type" class="select">${[['expense','Despesa'],['income','Receita'],['investment','Investimento']].map(([v,l])=>`<option value="${v}" ${d.type===v?'selected':''}>${l}</option>`).join('')}</select></div>
+   <div class="field"><label for="pc-amount">Valor</label><input id="pc-amount" class="input" inputmode="decimal" value="${d.amount?String(d.amount).replace('.',','):''}" ${d.amount?'':'autofocus'}></div></div>
+   <div class="field"><label for="pc-desc">Estabelecimento / descrição</label><input id="pc-desc" class="input" value="${esc(d.description)}"></div>
+   <div class="two"><div class="field"><label for="pc-cat">Categoria</label><select id="pc-cat" class="select">${catOpts(d.type,d.category)}</select></div><div class="field"><label for="pc-date">Data</label><input id="pc-date" class="input" type="date" value="${esc(d.date)}"></div></div>
+   <div class="two"><div class="field"><label for="pc-pay">Pagamento</label><select id="pc-pay" class="select">${PAYS.map(p=>`<option value="${p}" ${d.payment===p?'selected':''}>${p||'—'}</option>`).join('')}</select></div>
+   ${accs.length?`<div class="field"><label for="pc-acc">Conta / cartão</label><select id="pc-acc" class="select"><option value="">—</option>${accs.map(a=>`<option value="${esc(a.id)}" ${d.accountId===a.id?'selected':''}>${a.limit!=null?'💳':'🏦'} ${esc(a.name)}</option>`).join('')}</select></div>`:'<div></div>'}</div>
+   <label class="trow"><span><b>Anexar a foto ao lançamento</b><small>Guardada de forma reduzida, na sua conta</small></span><input id="pc-attach" type="checkbox" class="sw" ${d.attach?'checked':''}></label>
+   <p id="pc-err" class="err" role="alert"></p>
+   <button class="btn primary block" data-action="ph-save">Salvar lançamento</button>
+   <div class="two" style="margin-top:10px"><button class="btn ghost" data-action="ph-again">📷 Outra foto</button><button class="btn ghost" data-sheet-x="0">Cancelar</button></div>`);
+}
+function collectPhoto(){
+  const g=id=>elx(id);if(!pdraft||!g('pc-type'))return;
+  Object.assign(pdraft,{type:g('pc-type').value,amount:parseMoney(g('pc-amount').value),description:g('pc-desc').value.trim(),category:g('pc-cat').value,date:g('pc-date').value,payment:g('pc-pay').value,accountId:g('pc-acc')?g('pc-acc').value:'',attach:!!g('pc-attach')?.checked});
+}
+async function savePhotoDraft(d,auto){
+  const base={userId:state.user.uid,date:d.date,type:d.type,category:d.category,amount:d.amount,description:d.description||d.category,status:d.date>todayStr()?'pending':'paid',payment:d.payment||undefined,accountId:d.accountId||undefined,tags:[],via:'foto',createdAt:new Date().toISOString()};
+  if(!auto&&d.sug&&d.sug!==d.category&&d.description)learnRule(d.description,d.category,d.type);
+  let created=null;
+  if(!await safe(async()=>{created=(await DB.addTx([base]))[0];}))return;
+  let attached=false,msg='';
+  if(d.attach&&d.photo){
+    try{await RC.save(created.id,d.photo);await DB.updTx(created.id,{hasReceipt:true});attached=true;}
+    catch(e){console.error(e);msg=e.code==='permission-denied'?'Lançamento salvo, mas a foto não foi anexada: falta publicar a regra "receipts" no Firestore (Ajustes › Sobre e ajuda).':'Lançamento salvo, mas a foto não foi anexada. Edite o lançamento para anexar depois.';}
+  }
+  closeSheet();render();
+  toast(msg||`Lançamento salvo${attached?' com foto 📎':''} ✓`,'Desfazer',()=>safe(async()=>{await DB.delTx([created.id]);if(attached)await RC.del(created.id);render();}));
+  hooks.afterSave.forEach(f=>{try{f([base]);}catch(e){console.error(e);}});
+}
+fieldHandlers.push((e,t)=>{
+  if(e.type!=='change')return;
+  if((t.id==='ph-cam'||t.id==='ph-gal')&&t.files&&t.files[0]){const f=t.files[0];t.value='';processPhoto(f);return;}
+  if(t.id==='pc-type'&&pdraft){
+    collectPhoto();const sug=suggestCategory(pdraft.description,pdraft.type);
+    pdraft.category=sug&&activeCats(pdraft.type).includes(sug)?sug:(activeCats(pdraft.type).includes('Outros')?'Outros':activeCats(pdraft.type)[0]);pdraft.sug=pdraft.category;openPhotoConfirm(pdraft);
+  }
+});
+fieldHandlers.push(async(e,t)=>{ // anexar foto a um lançamento já existente
+  if(e.type!=='change'||t.id!=='rc-file'||!t.files||!t.files[0])return;
+  const id=t.dataset.id,file=t.files[0];t.value='';toast('Reduzindo e anexando a foto…');
+  try{
+    const c=await compress(file,1600,.85);await RC.save(id,downscale(c.canvas,1000,.62));await DB.updTx(id,{hasReceipt:true});render();
+    const tx=state.tx.find(x=>x.id===id);if(tx)openTxForm({tx});toast('Foto anexada ✓');
+  }catch(err){console.error(err);toast(err.code==='permission-denied'?'Falta publicar a regra "receipts" no Firestore (Ajustes › Sobre e ajuda).':'Não consegui anexar a foto. Tente outra imagem.');}
+});
+
+/* ---------- Ajustes nos módulos existentes (comprovante na lista e no formulário) ---------- */
+const _txRowB=txRow;
+txRow=function(t,showDate){const h=_txRowB(t,showDate);return t.hasReceipt?h.replace('<div class="t">','<div class="t">📎 '):h;};
+const _openTxFormB=openTxForm;
+openTxForm=function(opts={}){
+  _openTxFormB(opts);
+  const t=opts.tx;if(!t||!t.id)return;
+  const btn=$('#sheet [data-action=save-tx]');if(!btn)return;
+  btn.insertAdjacentHTML('beforebegin',`<div class="field" id="rc-block"><label>Comprovante</label>${t.hasReceipt?`<div class="two"><button class="btn ghost" data-action="rc-view" data-id="${esc(t.id)}">📎 Ver foto</button><button class="btn danger" data-action="rc-del" data-id="${esc(t.id)}">Remover</button></div>`:`<label class="btn ghost" for="rc-file" style="cursor:pointer">📎 Anexar foto</label><input id="rc-file" type="file" accept="image/*" class="hidden" data-id="${esc(t.id)}">`}</div>`);
+};
+const _deleteAccountB=deleteAccount;
+deleteAccount=async function(pass){
+  if(state.mode==='firebase'){
+    const u=await reauth(pass);
+    try{const snap=await F.getDocs(F.query(F.collection(fb.db,'receipts'),F.where('userId','==',u.uid))),ids=snap.docs.map(d=>d.id);for(let i=0;i<ids.length;i+=400){const b=F.writeBatch(fb.db);ids.slice(i,i+400).forEach(id=>b.delete(F.doc(fb.db,'receipts',id)));await b.commit();}}catch(e){console.warn('receipts',e);}
+  }
+  return _deleteAccountB(pass);
+};
+const _pageAboutB=pageAbout;
+pageAbout=function(){
+  return _pageAboutB()+(state.mode==='firebase'?`<div class="card cardx"><h3>Regra para comprovantes (fotos)</h3><p class="muted small" style="margin-top:0">Para anexar fotos aos lançamentos, publique também esta regra no Firestore, no mesmo lugar da anterior:</p><pre class="code">${esc(RECEIPTS_RULE)}</pre><button class="btn ghost block" data-action="copy-rules2">Copiar regra</button></div>`:'');
+};
+
+/* ---------- Autoteste de leitura de foto (Ajustes › Voz e foto) ---------- */
+function fakeReceipt(){
+  const c=document.createElement('canvas');c.width=900;c.height=640;const x=c.getContext('2d');
+  x.fillStyle='#fff';x.fillRect(0,0,900,640);x.fillStyle='#000';
+  x.font='bold 50px Arial, Helvetica, sans-serif';x.fillText('MERCADO CENTRAL',50,80);
+  x.font='36px Arial, Helvetica, sans-serif';
+  [['CUPOM FISCAL',150],['DATA: '+todayStr().split('-').reverse().join('/'),205],['ARROZ 5KG         22,90',290],['FEIJAO 1KG            9,00',345],['CAFE 500G           14,00',400],['PAGAMENTO: PIX',560]].forEach(([s,y])=>x.fillText(s,50,y));
+  x.font='bold 44px Arial, Helvetica, sans-serif';x.fillText('TOTAL R$ 45,90',50,480);
+  return c;
+}
+const FAKE_TEXT=()=>`MERCADO CENTRAL\nCUPOM FISCAL\nDATA: ${todayStr().split('-').reverse().join('/')}\nARROZ 5KG 22,90\nFEIJAO 1KG 9,00\nCAFE 500G 14,00\nTOTAL R$ 45,90\nPAGAMENTO: PIX`;
+function stepsUI(title,intro,L,again){
+  const run=++VT.run,res={};L.forEach(([k])=>res[k]={s:'wait',m:'',h:''});
+  const alive=()=>run===VT.run&&!!elx('vt-list');
+  const draw=()=>{const el=elx('vt-list');if(!el)return false;el.innerHTML=L.map(([k,l])=>{const r=res[k],ic={wait:'⚪',run:'⏳',ok:'✅',bad:'❌',info:'ℹ️'}[r.s];return `<li><span class="st">${ic}</span><span><b>${l}</b>${r.m?`<small>${esc(r.m)}</small>`:''}${r.h?`<small>👉 ${esc(r.h)}</small>`:''}</span></li>`;}).join('');return true;};
+  const set=(k,s,m,h)=>{res[k]={s,m:m||'',h:h||''};return draw();};
+  openSheet(`<h3>${title}</h3><p class="muted small" style="margin-top:0">${intro}</p><ul class="steps" id="vt-list"></ul><div id="vt-final" style="margin-top:14px"></div>`);
+  VT.run=run;draw();
+  const finish=()=>{if(!alive())return;const bad=L.filter(([k])=>res[k].s==='bad').length;elx('vt-final').innerHTML=`<div class="${bad?'notice':'ins ok'}" role="status"><b>${bad?`${bad} etapa(s) com problema.`:'Tudo certo! A leitura de foto está pronta.'}</b>${bad?'<br>Siga as dicas “👉” e repita o teste.':''}</div><div class="two" style="margin-top:10px"><button class="btn primary" data-action="${again}">Repetir teste</button><button class="btn ghost" data-sheet-x="0">Fechar</button></div>`;};
+  return {set,alive,finish};
+}
+async function runPhotoTest(){
+  const T=stepsUI('📷 Teste de leitura de foto','Vou usar um comprovante de exemplo gerado aqui mesmo. Nada é salvo nos seus lançamentos.',[['res','Recursos do navegador'],['cam','Câmera e galeria'],['comp','Compressão da imagem'],['ai','Leitura por IA'],['ocr','Leitor OCR (plano B)'],['parse','Interpretação do texto'],['store','Armazenamento do comprovante']],'test-photo');
+  const {set,alive,finish}=T,nap=ms=>new Promise(r=>setTimeout(r,ms));
+  // 1 recursos
+  set('res','run');await nap(200);if(!alive())return;
+  const miss=[['FileReader',!!window.FileReader],['canvas',!!document.createElement('canvas').getContext],['Blob',!!window.Blob],['createImageBitmap',!!window.createImageBitmap]].filter(x=>!x[1]).map(x=>x[0]);
+  set('res',miss.length?'bad':'ok',miss.length?'Faltam recursos: '+miss.join(', ')+'.':'Leitura de arquivo, canvas e decodificação de imagem disponíveis.',miss.length?'Atualize o navegador (Chrome, Edge ou Safari recentes).':'');
+  // 2 câmera
+  const capOk='capture' in document.createElement('input');
+  set('cam','ok',capOk?'O botão “Tirar foto” abre a câmera traseira no celular; no computador abre o seletor de arquivos.':'Este navegador ignora o atributo de câmera: o botão abrirá o seletor de arquivos/galeria.','Se a câmera não abrir no celular, confira a permissão de câmera do navegador nas configurações do sistema.');
+  // 3 compressão
+  set('comp','run');let big=null;
+  try{
+    const src=document.createElement('canvas');src.width=2400;src.height=1700;src.getContext('2d').drawImage(fakeReceipt(),0,0,2400,1700);
+    const blob=await new Promise(r=>src.toBlob(r,'image/png'));
+    big=await compress(new File([blob],'teste.png',{type:'image/png'}),1600,.85);
+    const small=downscale(big.canvas,1000,.62);
+    if(!alive())return;
+    set('comp',big.w<=1600&&small.length>2000?'ok':'bad',`2400×1700 → ${big.w}×${big.h} para leitura (${Math.round(big.dataUrl.length*.75/1024)} KB) e ~${Math.round(small.length*.75/1024)} KB para guardar.`);
+  }catch(e){console.error(e);if(!alive())return;set('comp','bad','Falhou ao reduzir a imagem de teste.','Atualize o navegador e tente de novo.');}
+  // 4 IA
+  if(!aiAvailable())set('ai','info','Indisponível nesta hospedagem: usar IA exigiria uma chave guardada num servidor, que um site estático não tem. A leitura usa OCR no navegador.');
+  else{
+    set('ai','run','Chamando a IA com a imagem de teste…');
+    try{const r=big&&await aiRead(big.canvas.toDataURL('image/jpeg',.8));if(!alive())return;set('ai',r&&Math.abs((r.amount||0)-45.9)<.01?'ok':'info',r&&r.amount?`A IA leu o valor ${nf.format(r.amount)}.`:'A IA respondeu, mas sem valor.',r&&r.amount?'':'O OCR continua como plano B.');}
+    catch(e){if(!alive())return;set('ai','info','A IA não respondeu neste ambiente.','O OCR continua como plano B.');}
+  }
+  // 5 OCR
+  let text='';
+  set('ocr','run','Carregando o leitor (na primeira vez baixa alguns MB)…');
+  try{
+    if(!navigator.onLine)throw Object.assign(new Error('offline'),{code:'unavailable'});
+    await ensureTesseract();if(!alive())return;
+    const o=await ocr(enhance(fakeReceipt()),p=>{if(alive())set('ocr','run','Lendo o comprovante de exemplo… '+Math.round(p*100)+'%');});
+    if(!alive())return;text=o.text;
+    const good=/TOTAL/i.test(text)||/45[,.]90/.test(text);
+    set('ocr',good?'ok':'bad',`Texto lido (${text.replace(/\s/g,'').length} caracteres, confiança ${Math.round(o.conf)}%): “${text.replace(/\s+/g,' ').trim().slice(0,70)}…”`,good?'':'O leitor abriu mas não reconheceu o exemplo. Tente de novo em outra rede.');
+  }catch(e){
+    console.warn(e);if(!alive())return;
+    set('ocr','bad',!navigator.onLine?'Sem internet para carregar o leitor.':'Não consegui carregar o leitor OCR (rede lenta ou bloqueada).','Conecte-se à internet e repita (só é necessário na primeira vez). Sem o leitor, você ainda pode lançar com a foto anexada, preenchendo os campos à mão.');
+  }
+  // 6 interpretação
+  const usingFake=!text||!/TOTAL/i.test(text),p=parseReceipt(usingFake?FAKE_TEXT():text),prob=[];
+  if(!p.amount||Math.abs(p.amount-45.9)>.01)prob.push('valor');
+  if(p.date!==todayStr())prob.push('data');
+  if(!/mercado/i.test(p.merchant))prob.push('estabelecimento');
+  if(p.payment!=='Pix')prob.push('forma de pagamento');
+  if(!alive())return;
+  set('parse',prob.length?'bad':'ok',`${usingFake?'(texto de exemplo) ':''}Valor ${p.amount!=null?nf.format(p.amount):'—'}, data ${p.date?fmtDate(p.date):'—'}, ${p.merchant||'sem estabelecimento'}, ${p.payment||'sem forma de pagamento'}${p.category?`, categoria sugerida: ${p.category}`:''}.`,prob.length?'Não identifiquei: '+prob.join(', ')+'.':'');
+  // 7 armazenamento
+  set('store','run');const id='teste-'+Date.now(),tiny='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
+  try{
+    await RC.save(id,tiny);const back=await RC.get(id);await RC.del(id);if(!alive())return;
+    set('store',back===tiny?'ok':'bad',back===tiny?(state.mode==='firebase'?'Gravou, leu e apagou um comprovante de teste na coleção receipts.':'Armazenamento local funcionando.'):'Gravou, mas a leitura voltou diferente.');
+  }catch(e){
+    console.error(e);if(!alive())return;
+    set('store',isNet(e)?'info':'bad',e.code==='permission-denied'?'O Firestore recusou gravar em receipts.':isNet(e)?'Sem conexão para testar o armazenamento.':'Não consegui gravar o comprovante de teste.',e.code==='permission-denied'?'Publique a regra “receipts” (Ajustes › Sobre e ajuda).':'');
+  }
+  finish();
+}
+
+Object.assign(actions,{
+  'fab-photo'(){toggleFab(false);openPhotoSheet();},
+  'ph-manual'(){openTxForm();},
+  'ph-again'(){closeSheet();openPhotoSheet();},
+  'ph-save'(el){
+    collectPhoto();const d=pdraft,err=elx('pc-err');if(!d)return;
+    if(isNaN(d.amount)||!(d.amount>0)){err.textContent='Informe o valor do comprovante.';elx('pc-amount').focus();return;}
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(d.date)){err.textContent='Informe uma data válida.';return;}
+    el.disabled=true;savePhotoDraft(d,false).then(()=>{el.disabled=false;});
+  },
+  async 'rc-view'(el){
+    openSheet(`<h3>📎 Comprovante</h3><div id="rc-img" class="muted center" style="padding:30px">Carregando…</div><button class="btn ghost block" data-sheet-x="0">Fechar</button>`);
+    try{const d=await RC.get(el.dataset.id),box=elx('rc-img');if(box)box.innerHTML=d?`<img class="thumb" style="max-height:60vh" src="${esc(d)}" alt="Comprovante">`:'<p>Comprovante não encontrado (ou ainda sincronizando).</p>';}
+    catch(e){const box=elx('rc-img');if(box)box.innerHTML='<p class="err">Não consegui carregar a foto. Verifique a conexão e a regra “receipts”.</p>';}
+  },
+  async 'rc-del'(el){
+    if(!await confirmSheet('Remover comprovante','A foto será apagada. O lançamento continua.','Remover',true))return;
+    const id=el.dataset.id;
+    if(await safe(async()=>{await RC.del(id);await DB.updTx(id,{hasReceipt:false});})){render();toast('Comprovante removido.');}
+  },
+  async 'copy-rules2'(){toast(await copyText(RECEIPTS_RULE)?'Regra copiada ✓':'Não consegui copiar. Selecione o texto e copie.');},
+  'test-photo'(){runPhotoTest();}
+});
 boot();
 </script>
 </body>
