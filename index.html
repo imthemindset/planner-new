@@ -1388,8 +1388,8 @@ Object.assign(actions,{
   'cat-edit'(el){openCatForm(+el.dataset.i);},
   'cat-up'(el){ensureCats();const l=S().categories[catType],i=+el.dataset.i;if(i>0){[l[i-1],l[i]]=[l[i],l[i-1]];saveSettings(false);render();}},
   'cat-down'(el){ensureCats();const l=S().categories[catType],i=+el.dataset.i;if(i<l.length-1){[l[i+1],l[i]]=[l[i],l[i+1]];saveSettings(false);render();}},
-  'cat-ico'(el){catDraft.icon=el.dataset.v;$('#cf-ico').value=el.dataset.v;$('.emojis button').forEach(b=>b.classList.toggle('on',b===el));},
-  'cat-col'(el){catDraft.color=el.dataset.v;$('.swatch').forEach(b=>b.classList.toggle('on',b===el));},
+  'cat-ico'(el){catDraft.icon=el.dataset.v;$('#cf-ico').value=el.dataset.v;$$('.emojis button').forEach(b=>b.classList.toggle('on',b===el));},
+  'cat-col'(el){catDraft.color=el.dataset.v;$$('.swatch').forEach(b=>b.classList.toggle('on',b===el));},
   async 'cat-save'(){
     const name=$('#cf-name').value.trim(),err=$('#cf-err');
     if(!name){err.textContent='Dê um nome para a categoria.';return;}
@@ -2475,6 +2475,720 @@ Object.assign(actions,{
   async 'copy-rules2'(){toast(await copyText(RECEIPTS_RULE)?'Regra copiada ✓':'Não consegui copiar. Selecione o texto e copie.');},
   'test-photo'(){runPhotoTest();}
 });
+/* =====================================================================
+   18. Plann-C: nome, acesso (entrar, criar conta, sair) e folhas arrastáveis
+   ===================================================================== */
+const APP_NAME='Plann-C';
+document.title=APP_NAME;
+(()=>{const st=document.createElement('style');st.textContent=`
+.logo b{font-size:26px;color:#fff;letter-spacing:-.04em}
+.logo.sm b{font-size:18px}
+.brandname{font-weight:800;letter-spacing:-.03em}
+.brandname i{font-style:normal;background:linear-gradient(135deg,#6366f1,#c026d3);-webkit-background-clip:text;background-clip:text;color:transparent}
+.sheet{position:relative;max-height:94vh;overscroll-behavior:contain;will-change:transform}
+.sheet.drag{transition:none}
+.grab{width:100%;height:30px;background:none;border-radius:0;margin:-14px 0 2px;display:flex;align-items:center;justify-content:center;cursor:grab;touch-action:none}
+.grab::before{content:"";width:46px;height:5px;border-radius:9px;background:rgba(148,163,184,.55)}
+.sheet-close{position:absolute;right:14px;top:12px;width:40px;height:40px;border-radius:50%;background:rgba(148,163,184,.2);font-size:16px;font-weight:800;display:grid;place-items:center;z-index:4}
+.sheet>h3:first-of-type{padding-right:46px}
+.sheet-foot{position:sticky;bottom:0;margin:8px -18px 0;padding:14px 18px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(to top,var(--solid) 78%,rgba(0,0,0,0));z-index:3}
+details.more{border:1px solid var(--line);border-radius:14px;padding:2px 12px;margin-bottom:12px}
+details.more summary{min-height:46px;display:flex;align-items:center;font-weight:700;cursor:pointer;color:var(--muted)}
+details.more[open] summary{margin-bottom:6px}
+.fform #ff-amount{text-align:center;font-size:34px;min-height:68px}
+.fform #ff-amount-label{text-align:center}
+`;document.head.appendChild(st);})();
+
+/* ---------- Entrar / criar conta / esqueci a senha ---------- */
+let authMode='login';
+function authHtml(mode){
+  const su=mode==='signup';
+  return `<div class="login-card">
+   <div class="logo"><b>P</b></div>
+   <h1 class="brandname">Plann-<i>C</i></h1>
+   <p class="muted">Seu planejamento financeiro, só seu</p>
+   <div class="seg"><button type="button" class="${su?'':'on'}" data-auth="login">Entrar</button><button type="button" class="${su?'on':''}" data-auth="signup">Criar conta</button></div>
+   <form id="auth-form" novalidate>
+    ${su?`<div class="field"><label for="au-name">Como quer ser chamado?</label><input id="au-name" class="input" autocomplete="nickname" placeholder="Seu nome ou apelido"></div>`:''}
+    <div class="field"><label for="au-email">E-mail</label><input id="au-email" class="input" type="email" autocomplete="email" placeholder="voce@email.com"></div>
+    <div class="field"><label for="au-pass">Senha</label><div class="searchbar"><input id="au-pass" class="input" type="password" autocomplete="${su?'new-password':'current-password'}" placeholder="${su?'Mínimo 6 caracteres':'Sua senha'}"><button type="button" class="icon-btn" data-auth="toggle" aria-label="Mostrar ou ocultar senha">👁</button></div></div>
+    ${su?`<div class="field"><label for="au-pass2">Repita a senha</label><input id="au-pass2" class="input" type="password" autocomplete="new-password"></div>`:''}
+    <p id="au-msg" class="msg" role="alert"></p>
+    <button class="btn primary block" type="submit">${su?'Criar minha conta':'Entrar'}</button>
+   </form>
+   ${su?'':`<p class="center" style="margin:14px 0 0"><button type="button" class="btn ghost" data-auth="reset">Esqueci minha senha</button></p>`}
+   <p class="muted small center" style="margin:16px 0 0">🔒 Seus dados ficam na sua conta e só você os vê.</p>
+  </div>`;
+}
+const authMsg=(t,info)=>{const m=$('#au-msg');if(m){m.textContent=t;m.className='msg'+(info?' info':'');}};
+const loginErr=e=>{const c=e&&e.code;return ['auth/wrong-password','auth/user-not-found','auth/invalid-credential','auth/invalid-email'].includes(c)?'E-mail ou senha incorretos.':c==='auth/network-request-failed'?'Sem conexão. Verifique sua internet.':c==='auth/too-many-requests'?'Muitas tentativas. Aguarde alguns minutos.':c==='auth/user-disabled'?'Esta conta foi desativada.':'Não foi possível entrar. Tente novamente.';};
+const signupErr=e=>{const c=e&&e.code;return c==='auth/email-already-in-use'?'Este e-mail já tem conta. Entre ou use “Esqueci minha senha”.':c==='auth/invalid-email'?'E-mail inválido.':c==='auth/weak-password'?'A senha precisa ter pelo menos 6 caracteres.':c==='auth/operation-not-allowed'?'O cadastro por e-mail está desativado no Firebase (Authentication › Método de login › E-mail/senha).':c==='auth/network-request-failed'?'Sem conexão. Verifique sua internet.':'Não foi possível criar a conta. Tente novamente.';};
+async function authSubmit(){
+  const email=$('#au-email').value.trim(),pass=$('#au-pass').value,su=authMode==='signup';
+  if(!email||!pass){authMsg('Preencha e-mail e senha.');return;}
+  if(!A){authMsg('Não consegui conectar ao Firebase. Confira a internet e tente de novo.');return;}
+  if(su){
+    const name=$('#au-name').value.trim();
+    if(pass.length<6){authMsg('A senha precisa ter pelo menos 6 caracteres.');return;}
+    if(pass!==$('#au-pass2').value){authMsg('As senhas não coincidem.');return;}
+    authMsg('Criando sua conta…',true);
+    try{
+      const cred=await A.createUserWithEmailAndPassword(fb.auth,email,pass);
+      store.set('pf_loginAt_'+cred.user.uid,Date.now());
+      try{await A.updateProfile(cred.user,{displayName:name});}catch{}
+      try{await A.sendEmailVerification(cred.user);}catch{}
+      for(let i=0;i<60&&(state.loading||!state.user);i++)await new Promise(r=>setTimeout(r,100));
+      if(name){S().profile.nickname=name;if(!S().profile.name)S().profile.name=name;saveSettings(false);render();}
+      toast('Conta criada! Enviamos um e-mail para confirmar seu endereço.');
+    }catch(err){console.error(err);authMsg(signupErr(err));}
+  }else{
+    authMsg('Entrando…',true);
+    try{const cred=await A.signInWithEmailAndPassword(fb.auth,email,pass);store.set('pf_loginAt_'+cred.user.uid,Date.now());authMsg('');}
+    catch(err){authMsg(loginErr(err));}
+  }
+}
+async function authReset(){
+  const email=(($('#au-email')||{}).value||'').trim();
+  if(!email){authMsg('Digite seu e-mail acima e toque em “Esqueci minha senha”.');return;}
+  if(!A){authMsg('Não consegui conectar ao Firebase.');return;}
+  try{await A.sendPasswordResetEmail(fb.auth,email);authMsg('Pronto! Se existir uma conta com esse e-mail, enviamos o link para criar uma nova senha. Confira o spam.',true);}
+  catch(err){authMsg(err.code==='auth/invalid-email'?'E-mail inválido.':err.code==='auth/network-request-failed'?'Sem conexão.':'Não foi possível enviar agora. Tente de novo.');}
+}
+(()=>{
+  const L=$('#login');L.innerHTML=authHtml('login');
+  L.addEventListener('click',e=>{
+    const b=e.target.closest('[data-auth]');if(!b)return;const a=b.dataset.auth;
+    if(a==='login'||a==='signup'){authMode=a;L.innerHTML=authHtml(a);}
+    else if(a==='toggle'){const p=$('#au-pass');if(p)p.type=p.type==='password'?'text':'password';}
+    else if(a==='reset')authReset();
+  });
+  L.addEventListener('submit',e=>{e.preventDefault();authSubmit();});
+})();
+// Modo local (Firebase indisponível): permite tentar conectar e abrir a tela de entrada
+async function goLogin(){
+  if(state.mode==='firebase'){toast('Você já está conectado.');return;}
+  toast('Conectando ao Firebase…');
+  if(!(await initFirebase())){toast('Não consegui conectar ao Firebase agora. Confira a internet e se o domínio do site está autorizado.');return;}
+  state.mode='firebase';state.user=null;
+  A.onAuthStateChanged(fb.auth,async u=>{if(u){state.user=u;await enterApp();}else{state.user=null;state.tx=[];state.goals=[];state.settings=defSettings();showLogin();}});
+}
+
+/* ---------- Marca e botões de sair/entrar visíveis ---------- */
+buildShell=function(){
+  $('#side').innerHTML=`<div class="brand"><span class="logo sm"><b>P</b></span><span class="brandname" style="font-size:20px">Plann-<i>C</i></span></div>
+   ${NAV.map(n=>`<button class="nav-btn" data-view="${n.v}">${ico(n.i)}<span>${n.l}</span></button>`).join('')}
+   <div class="grow"></div><div id="who" class="muted small" style="padding:0 10px;word-break:break-all"></div>
+   <button class="btn ghost" data-action="quick-logout" style="margin:8px 4px 0">🚪 <span id="side-out">Sair</span></button>`;
+  const b=NAV.map(n=>`<button class="nav-btn" data-view="${n.v}">${ico(n.i)}<span>${n.l}</span></button>`);
+  $('#bottom').innerHTML=b[0]+b[1]+'<div></div>'+b[2]+b[3];
+};
+hooks.afterLoad.push(()=>{const s=$('#side-out');if(s)s.textContent=state.mode==='firebase'?'Sair':'Entrar';});
+const _topbarC=topbar;
+topbar=function(title,sub,withMonth=true){
+  const h=_topbarC(title,sub,withMonth);
+  const b=state.mode==='firebase'?`<button class="icon-btn" data-action="quick-logout" aria-label="Sair da conta" title="Sair">🚪</button>`:`<button class="icon-btn" data-action="go-login" aria-label="Entrar ou criar conta" title="Entrar">🔐</button>`;
+  return h.replace(/<\/div><\/header>\s*$/,b+'</div></header>');
+};
+const _settingsHomeC=settingsHome;
+settingsHome=function(){
+  return _settingsHomeC().replace(/<p class="muted small center">Planejador Financeiro · ([^<]*)<\/p>/,(m,v)=>
+    (state.mode==='firebase'?`<button class="btn danger block" data-action="quick-logout" style="margin-top:6px">🚪 Sair da conta</button>`:`<button class="btn primary block" data-action="go-login" style="margin-top:6px">🔐 Entrar ou criar conta</button><p class="muted small center">Modo local: seus dados ficam só neste navegador.</p>`)+`<p class="muted small center" style="margin-top:12px">${APP_NAME} · ${v}</p>`);
+};
+const _downloadC=download;
+download=function(text,name,type){return _downloadC(text,String(name).replace('backup-planejador','backup-plann-c').replace(/^lancamentos-/,'plann-c-lancamentos-'),type);};
+const _copyTextC=copyText;
+copyText=function(txt){return _copyTextC(String(txt).replace('Problema no Planejador Financeiro','Problema no Plann-C'));};
+Object.assign(actions,{
+  'go-login'(){goLogin();},
+  async 'quick-logout'(){
+    if(state.mode!=='firebase'){goLogin();return;}
+    if(await confirmSheet('Sair do Plann-C','Você precisará entrar novamente neste aparelho.','Sair'))await A.signOut(fb.auth);
+  },
+  async 'report-share'(){
+    const text=reportText().replace('Problema no Planejador Financeiro','Problema no Plann-C');
+    if(navigator.share){try{await navigator.share({title:'Problema no Plann-C',text});return;}catch(e){if(e.name==='AbortError')return;}}
+    toast(await copyText(text)?'Relatório copiado ✓ Cole onde quiser enviar.':'Não consegui compartilhar.');
+  }
+});
+
+/* ---------- Folhas (sheets): arrastar para baixo, botão ✕ e layout do lançamento ---------- */
+const _openSheetC=openSheet;
+openSheet=function(html){
+  const s=$('#sheet');s.classList.remove('fform');s.style.transform='';
+  _openSheetC(`<button class="sheet-close" data-sheet-x="0" aria-label="Fechar">✕</button>`+html);
+};
+(()=>{
+  const sh=$('#sheet'),bk=$('#sheet-back');let st=null;
+  const isOpen=()=>bk.classList.contains('on');
+  const setY=y=>{sh.style.transform=`translateY(${y}px)`;bk.style.background=`rgba(10,15,31,${Math.max(.08,.5-y/700)})`;};
+  const reset=()=>{sh.classList.remove('drag');sh.style.transform='';bk.style.background='';};
+  const begin=(y,grab)=>{if(isOpen())st={y0:y,dy:0,t0:performance.now(),grab,go:false};};
+  const move=(y,e)=>{
+    if(!st)return;const dy=y-st.y0;
+    if(!st.go){if(dy>8&&(st.grab||sh.scrollTop<=0)){st.go=true;sh.classList.add('drag');}else{if(dy<-8)st=null;return;}}
+    st.dy=Math.max(0,dy);setY(st.dy);if(e&&e.cancelable)e.preventDefault();
+  };
+  const end=()=>{
+    if(!st)return;const {dy,t0,go}=st;st=null;if(!go)return;
+    const v=dy/Math.max(1,performance.now()-t0);
+    if(dy>120||v>.7){sh.classList.remove('drag');sh.style.transform='translateY(100%)';setTimeout(()=>{closeSheet(false);reset();},200);}
+    else reset();
+  };
+  sh.addEventListener('touchstart',e=>{if(e.target.closest('canvas,input[type=range]'))return;begin(e.touches[0].clientY,!!e.target.closest('.grab'));},{passive:true});
+  sh.addEventListener('touchmove',e=>move(e.touches[0].clientY,e),{passive:false});
+  sh.addEventListener('touchend',end);
+  sh.addEventListener('touchcancel',()=>{st=null;reset();});
+  sh.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'&&e.target.closest('.grab')){begin(e.clientY,true);try{sh.setPointerCapture(e.pointerId);}catch{}}});
+  sh.addEventListener('pointermove',e=>{if(e.pointerType==='mouse'&&st)move(e.clientY,e);});
+  sh.addEventListener('pointerup',e=>{if(e.pointerType==='mouse')end();});
+})();
+const _openTxFormD=openTxForm;
+openTxForm=function(opts={}){
+  _openTxFormD(opts);
+  const sh=$('#sheet');if(!sh||!$('#ff-amount'))return;
+  sh.classList.add('fform');
+  const btn=sh.querySelector('[data-action=save-tx]');
+  if(btn&&!btn.closest('.sheet-foot')){const w=document.createElement('div');w.className='sheet-foot';btn.replaceWith(w);w.appendChild(btn);}
+  const tg=$('#ff-tags'),nt=$('#ff-note');
+  if(tg&&nt){
+    const f1=tg.closest('.field'),f2=nt.closest('.field'),d=document.createElement('details');
+    d.className='more';d.innerHTML='<summary>Mais detalhes: tags e observação</summary>';d.open=!!(tg.value||nt.value);
+    f1.before(d);d.appendChild(f1);d.appendChild(f2);
+  }
+};
+
+/* =====================================================================
+   19. VOZ (melhorias): permissão guiada, todos os campos e confirmação melhor
+   ===================================================================== */
+['vence','vencimento','vencendo','pagar','vou','todo','toda','todos','todas','mensal','mensalmente','semanal','semanalmente','anual','anualmente','agendado','agendada','pendente','categoria','ja','ainda','nao','aberto','receber','quitado','quitada','conta','forma','pagamento','via','usando','usei','pelo','tag','tags','observacao','obs'].forEach(w=>V_DROP.add(w));
+
+// --- permissão do microfone: pedido explícito (Chrome e Safari) e ajuda por plataforma
+let micState='unknown',micOK=false;
+const UA_=navigator.userAgent,IS_IOS=/iPad|iPhone|iPod/.test(UA_)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1),IS_SAFARI=/^((?!chrome|android|crios|fxios|edg).)*safari/i.test(UA_);
+function micHelp(){
+  if(IS_IOS)return 'No iPhone/iPad (Safari): toque em “aA” na barra de endereço › Ajustes do site › Microfone › Permitir. Depois, em Ajustes › Geral › Teclado, ative o Ditado (o reconhecimento de voz usa o Ditado). Recarregue a página.';
+  if(IS_SAFARI)return 'No Safari do Mac: Safari › Configurações › Sites › Microfone › deixe este site em “Permitir”. Em Configurações do Sistema › Teclado, ative o Ditado. Recarregue a página.';
+  if(/android/i.test(UA_))return 'No Chrome do Android: toque no cadeado ao lado do endereço › Permissões › Microfone › Permitir. Se continuar bloqueado: Configurações do Android › Apps › Chrome › Permissões › Microfone. Recarregue a página.';
+  return 'No Chrome/Edge: clique no cadeado ao lado do endereço › Configurações do site › Microfone › Permitir. Recarregue a página.';
+}
+VERR['not-allowed']=['Permissão do microfone negada',micHelp()+' Depois toque de novo no microfone.'];
+VERR['service-not-allowed']=['O navegador bloqueou o serviço de voz','O reconhecimento de voz só funciona em https e com o Ditado/serviço de voz do sistema ligado. '+micHelp()+' Se o site estiver dentro de outro app ou de outra página (iframe), abra o endereço direto no navegador.'];
+async function refreshMic(){
+  try{if(navigator.permissions&&navigator.permissions.query){const p=await navigator.permissions.query({name:'microphone'});micState=p.state;p.onchange=()=>{micState=p.state;paintMic();};}}catch{}
+  return micState;
+}
+function askMic(){ // chama getUserMedia agora: precisa ser invocado direto de um toque do usuário
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)return Promise.resolve({ok:false,code:'unsupported'});
+  return navigator.mediaDevices.getUserMedia({audio:true}).then(s=>{s.getTracks().forEach(t=>t.stop());return {ok:true};}).catch(e=>({ok:false,code:(e&&e.name)||'error'}));
+}
+function paintMic(){
+  const box=elx('v-perm');if(!box)return;
+  if(micState==='granted'){box.innerHTML='<div class="ins ok"><span aria-hidden="true">✅</span><span>Microfone liberado. Toque no botão e fale.</span></div>';return;}
+  if(micState==='denied'){
+    const fr=voiceSupport().find(i=>i.k==='iframe'||i.k==='inapp');
+    box.innerHTML=`<div class="notice" role="alert"><b>🚫 Microfone bloqueado para este site.</b><br>${fr?esc(fr.t)+'<br>':''}${esc(micHelp())}</div>`;return;
+  }
+  box.innerHTML=`<div class="ins"><span aria-hidden="true">🎙️</span><span>Primeiro, libere o microfone: o navegador vai perguntar e você toca em <b>Permitir</b>.</span></div><button class="btn primary block" style="margin-bottom:10px" data-action="mic-allow">🎙️ Permitir microfone</button>`;
+}
+function askMicNow(thenStart){
+  const t0=performance.now(),p=askMic(),l=elx('v-live');
+  if(l)l.innerHTML='<span class="muted">Aguardando a sua autorização no aviso do navegador…</span>';
+  p.then(r=>{
+    if(r.ok){
+      micState='granted';micOK=true;paintMic();
+      const l2=elx('v-live');if(l2)l2.innerHTML='<span class="muted">Microfone liberado ✅ Toque no microfone grande e fale.</span>';
+      if(thenStart&&performance.now()-t0<450)vStart();
+      return;
+    }
+    if(r.code==='NotAllowedError'||r.code==='SecurityError')micState='denied';
+    paintMic();
+    const msg=r.code==='NotFoundError'?'Não encontrei um microfone neste aparelho.':r.code==='NotReadableError'?'O microfone está em uso por outro app. Feche-o e tente de novo.':r.code==='unsupported'?'Este navegador não liberou acesso ao microfone (página insegura ou embutida em outro site).':'';
+    const b=elx('v-err');if(b&&msg)b.innerHTML=`<div class="notice" role="alert">${esc(msg)}</div>`;
+  });
+}
+const _sveB=showVoiceError;
+showVoiceError=function(code){_sveB(code);if(code==='not-allowed')micState='denied';if(code==='not-allowed'||code==='service-not-allowed')paintMic();};
+
+openVoiceSheet=function(){
+  if(S().media.voice===false){toast('O lançamento por voz está desativado em Ajustes › Voz e foto.');return;}
+  const issues=voiceSupport();
+  openSheet(`<h3>🎙️ Lançar por voz</h3>
+   <div id="v-perm"></div>
+   ${issues.length?`<div class="notice">${issues.map(i=>esc(i.t)).join('<br>')}</div>`:''}
+   <div class="center"><button id="mic-btn" class="mic-big" data-action="v-toggle" aria-label="Começar a falar" ${SR?'':'disabled'}>🎙️</button></div>
+   <div id="v-wave" class="wave" aria-hidden="true">${Array.from({length:11},()=>'<i></i>').join('')}</div>
+   <div id="v-live" class="live" aria-live="polite"><span class="muted">${SR?'Toque no microfone e fale…':'Este navegador não tem reconhecimento de voz. Use o campo abaixo: dite pelo teclado do celular ou digite.'}</span></div>
+   <div id="v-err"></div><div id="v-result"></div>
+   <div class="field" style="margin-top:8px"><label for="v-text">Ou digite / dite pelo teclado</label><textarea id="v-text" class="textarea" rows="2" placeholder="gastei 45 no mercado hoje, paguei no pix"></textarea><small class="muted">Dica: toque no 🎤 do teclado do celular para ditar aqui, sem precisar liberar nada.</small><button class="btn primary block" style="margin-top:8px" data-action="v-text-go">Interpretar</button></div>
+   <details class="more"><summary>O que posso dizer?</summary><p class="muted small" style="line-height:1.6">• <b>Valor, local e data:</b> “gastei 45 no mercado hoje”<br>• <b>Forma de pagamento:</b> “no pix”, “no débito”, “no cartão de crédito Nubank”, “em dinheiro”, “no boleto”<br>• <b>Conta ou cartão:</b> “na conta Itaú”, “no cartão Nubank”<br>• <b>Parcelas:</b> “parcelei um tênis de 300 em 3 vezes”<br>• <b>Receitas e investimentos:</b> “recebi 3 mil de salário dia 5”, “investi 500 no tesouro”<br>• <b>A pagar:</b> “conta de internet 99 reais vence dia 10 no boleto”<br>• <b>Repetição:</b> “Netflix 39 e 90 todo mês no cartão”<br>• <b>Extras:</b> “categoria lazer”, “tag viagem”, “observação plano premium”<br>• <b>Vários de uma vez:</b> “gastei 30 na farmácia e 12 e meio no café”<br>• <b>Perguntas:</b> “quanto gastei com alimentação este mês?”, “qual meu saldo?”</p></details>
+   <button class="btn ghost block" data-sheet-x="0">Fechar</button>`);
+  paintMic();refreshMic().then(paintMic);
+};
+actions['v-toggle']=()=>{
+  if(VC){VC.stop();return;}
+  if(!SR){toast('Este navegador não tem reconhecimento de voz. Digite ou dite pelo teclado.');return;}
+  if(micState==='granted'||micOK){vStart();return;}
+  if(micState==='denied'){paintMic();return;}
+  askMicNow(true);
+};
+actions['mic-allow']=()=>askMicNow(false);
+
+// --- interpretação: situação (a pagar), repetição, categoria falada, tags, observação, pagamento e conta
+const _parseSegmentB=parseSegment;
+parseSegment=function(t,ctx){
+  let status=null,freq=null,count=0,hint=null;
+  if(/\b(vence|vencimento|vencendo|a pagar|vou pagar|pagar dia|ainda nao paguei|nao paguei|pendente|agendad[oa]|em aberto|a receber|vou receber|receber dia)\b/.test(t))status='pending';
+  else if(/\b(ja paguei|ja recebi|pago|quitad[oa])\b/.test(t))status='paid';
+  const rm=t.match(/\b(todo mes|todos os meses|mensal|mensalmente|toda semana|todas as semanas|semanal|semanalmente|todo ano|todos os anos|anual|anualmente)\b/);
+  if(rm){freq=/semana|semanal/.test(rm[1])?'weekly':/ano|anual/.test(rm[1])?'yearly':'monthly';const cm=t.match(/\b(?:por|durante|ate)\s+(\d{1,2})\s+(?:meses|semanas|anos)\b/);count=cm?clamp(+cm[1],2,60):(freq==='yearly'?3:12);}
+  const hm=t.match(/\bcategoria\s+([a-z0-9 ]+?)(?=\s+(?:no|na|em|de|do|da|hoje|ontem|paguei|gastei|recebi)\b|$)/);
+  if(hm){hint=hm[1].trim();t=t.replace(hm[0],' ');}
+  const it=_parseSegmentB(t,ctx);if(!it)return it;
+  if(status)it.status=status;
+  if(freq&&!(it.installments>1))it.recurrence={freq,count};
+  if(hint){const n=norm(hint),c=activeCats(it.type).find(x=>norm(x)===n)||activeCats(it.type).find(x=>norm(x).startsWith(n)||n.startsWith(norm(x)));if(c){it.category=c;it.sug=c;}}
+  if(status==='pending'&&it.dateExplicit&&it.date<todayStr()&&/\bdia \d/.test(t))it.date=addMonths(it.date,1);
+  if(!it.payment){
+    if(/\b(em maos|na mao)\b/.test(t))it.payment='Dinheiro';
+    else if(/\b(cheque|vale|ticket|voucher|cripto|bitcoin|picpay|mercado pago|apple pay|google pay|carteira digital)\b/.test(t))it.payment='Outro';
+  }
+  if(!it.accountId){
+    const typ=/\bpoupanca\b/.test(t)?'savings':/\bcarteira\b/.test(t)?'wallet':/\bconta corrente\b/.test(t)?'checking':null;
+    if(typ){const l=S().accounts.filter(a=>a.type===typ);if(l.length===1)it.accountId=l[0].id;}
+  }
+  return it;
+};
+const _parseVoiceB=parseVoice;
+parseVoice=function(text){
+  let src=String(text||''),note='';const tags=[];
+  src=src.replace(/\b(?:observa[cç][aã]o|obs|anota[cç][aã]o|coment[aá]rio)\b[:,]?\s*(.+)$/i,(m,a)=>{note=a.trim();return ' ';});
+  src=src.replace(/\b(?:tags?|etiquetas?|hashtags?)\s+([\p{L}\p{N}]+(?:\s*(?:,|\be\b)\s*[\p{L}\p{N}]+)*)/giu,(m,a)=>{a.split(/\s*(?:,|\be\b)\s*/).forEach(x=>{x=x.trim().toLowerCase();if(x)tags.push(x);});return ' ';});
+  const items=_parseVoiceB(src);
+  items.forEach(it=>{it.tags=[...new Set(tags)].slice(0,8);if(note)it.note=note;});
+  return items;
+};
+
+// --- confirmação em voz alta e tela de conferência com todos os campos
+summaryText=function(items){
+  const T={income:'Receita',expense:'Despesa',investment:'Investimento'};
+  const one=it=>{
+    const acc=it.accountId?accName(it.accountId):'';
+    return `${T[it.type]} de ${nf.format(it.amount)} em ${it.category}${it.description&&norm(it.description)!==norm(it.category)?', '+it.description:''}, ${dateSpoken(it.date)}${it.installments>1?`, em ${it.installments} vezes`:''}${it.payment?`, pagamento ${it.payment}`:''}${acc?`, ${acc}`:''}${it.status==='pending'?', pendente':''}${it.recurrence?`, repetindo ${it.recurrence.freq==='weekly'?'toda semana':it.recurrence.freq==='yearly'?'todo ano':'todo mês'}`:''}`;
+  };
+  return items.length===1?`${one(items[0])}. Confirmar?`:`${items.length} lançamentos. ${items.map(one).join('. ')}. Confirmar?`;
+};
+renderConfirm=function(){
+  const accs=[...S().accounts,...S().cards],n=vdraft.items.length;
+  openSheet(`<h3>Confirme ${n>1?n+' lançamentos':'o lançamento'}</h3>
+  <div class="live final" style="min-height:0;margin-top:0">“${esc(vdraft.spoken)}”</div>
+  ${vdraft.items.map((it,i)=>`<div class="vitem"><div class="hd"><span>${it.type==='income'?'⬆️ Receita':it.type==='investment'?'📈 Investimento':'⬇️ Despesa'} #${i+1}</span>${n>1?`<button class="mb" data-action="v-del" data-i="${i}" aria-label="Remover lançamento ${i+1}">✕</button>`:''}</div>
+   <div class="field"><label for="vc${i}-amount">${it.installments>1?'Valor total':'Valor'}</label><input id="vc${i}-amount" class="input big-in" inputmode="decimal" value="${String(it.amount).replace('.',',')}"></div>
+   <div class="field"><label for="vc${i}-desc">Descrição</label><input id="vc${i}-desc" class="input" value="${esc(it.description)}"></div>
+   <div class="two"><div class="field"><label for="vc${i}-type">Tipo</label><select id="vc${i}-type" class="select">${[['expense','Despesa'],['income','Receita'],['investment','Investimento']].map(([v,l])=>`<option value="${v}" ${it.type===v?'selected':''}>${l}</option>`).join('')}</select></div>
+   <div class="field"><label for="vc${i}-cat">Categoria</label><select id="vc${i}-cat" class="select">${catOpts(it.type,it.category)}</select></div></div>
+   <div class="two"><div class="field"><label for="vc${i}-date">Data</label><input id="vc${i}-date" class="input" type="date" value="${esc(it.date)}"></div>
+   <div class="field"><label for="vc${i}-status">Situação</label><select id="vc${i}-status" class="select"><option value="" ${!it.status?'selected':''}>Automática (pela data)</option><option value="paid" ${it.status==='paid'?'selected':''}>Paga</option><option value="pending" ${it.status==='pending'?'selected':''}>Pendente</option></select></div></div>
+   <div class="two"><div class="field"><label for="vc${i}-pay">Forma de pagamento</label><select id="vc${i}-pay" class="select">${PAYS.map(p=>`<option value="${p}" ${it.payment===p?'selected':''}>${p||'—'}</option>`).join('')}</select></div>
+   ${accs.length?`<div class="field"><label for="vc${i}-acc">Conta / cartão</label><select id="vc${i}-acc" class="select"><option value="">—</option>${accs.map(a=>`<option value="${esc(a.id)}" ${it.accountId===a.id?'selected':''}>${a.limit!=null?'💳':'🏦'} ${esc(a.name)}</option>`).join('')}</select></div>`:'<div></div>'}</div>
+   ${it.installments>1?`<div class="field"><label for="vc${i}-inst">Parcelas</label><input id="vc${i}-inst" class="input" type="number" min="1" max="48" value="${it.installments}"></div>`:''}
+   <details class="more" ${it.recurrence||(it.tags&&it.tags.length)||it.note?'open':''}><summary>Mais: repetição, tags e observação</summary>
+    <div class="two"><div class="field"><label for="vc${i}-rec">Repetir</label><select id="vc${i}-rec" class="select">${[['','Não repetir'],['monthly','Todo mês'],['weekly','Toda semana'],['yearly','Todo ano']].map(([v,l])=>`<option value="${v}" ${(it.recurrence?it.recurrence.freq:'')===v?'selected':''}>${l}</option>`).join('')}</select></div>
+    <div class="field"><label for="vc${i}-reccount">Vezes</label><input id="vc${i}-reccount" class="input" type="number" min="2" max="60" value="${it.recurrence?it.recurrence.count:12}"></div></div>
+    <div class="field"><label for="vc${i}-tags">Tags</label><input id="vc${i}-tags" class="input" placeholder="viagem, mercado" value="${esc((it.tags||[]).join(', '))}"></div>
+    <div class="field"><label for="vc${i}-note">Observação</label><textarea id="vc${i}-note" class="textarea" rows="2">${esc(it.note||'')}</textarea></div></details></div>`).join('')}
+  <p id="vc-err" class="err" role="alert"></p>
+  <div class="two"><button class="btn ghost" data-action="v-say">🎙️ Dizer “confirmar”</button><button class="btn ghost" data-action="v-again">Falar de novo</button></div>
+  <button class="btn ghost block" style="margin-top:10px" data-sheet-x="0">Cancelar</button>
+  <div class="sheet-foot"><button class="btn primary block" data-action="v-save">✓ Confirmar${n>1?' '+n+' lançamentos':''}</button></div>`);
+};
+collectDraft=function(){
+  vdraft.items.forEach((it,i)=>{
+    const g=k=>elx(`vc${i}-${k}`);if(!g('type'))return;
+    it.type=g('type').value;it.amount=parseMoney(g('amount').value);it.description=g('desc').value.trim();it.category=g('cat').value;it.date=g('date').value;
+    it.payment=g('pay').value;it.accountId=g('acc')?g('acc').value:'';it.status=g('status').value;
+    if(g('inst'))it.installments=intVal(g('inst').value,1,48,it.installments||1);
+    const rf=g('rec').value;it.recurrence=rf?{freq:rf,count:intVal(g('reccount').value,2,60,12)}:null;
+    it.tags=parseTags(g('tags').value);it.note=g('note').value.trim();
+  });
+};
+saveVoiceItems=async function(items,auto){
+  const today=todayStr(),list=[];
+  items.forEach(it=>{
+    const st=it.status||(it.date>today?'pending':'paid');
+    const base={userId:state.user.uid,date:it.date,type:it.type,category:it.category,amount:it.amount,description:it.description||it.category,status:st,payment:it.payment||undefined,accountId:it.accountId||undefined,tags:it.tags||[],note:it.note||undefined,via:'voz',createdAt:new Date().toISOString()};
+    if(it.installments>1){
+      const n=it.installments,gid=uid(),per=Math.floor(it.amount/n*100)/100;
+      for(let k=0;k<n;k++){const d=addMonths(it.date,k),a=k===n-1?round2(it.amount-per*(n-1)):per;list.push({...base,date:d,amount:a,description:`${base.description} (${k+1}/${n})`,status:(st==='pending'||d>today)?'pending':'paid',groupId:gid,installment:{n:k+1,of:n}});}
+    }else if(it.recurrence&&it.recurrence.count>1){
+      const {freq,count}=it.recurrence,gid=uid();
+      for(let k=0;k<count;k++){const d=freq==='weekly'?addDays(it.date,7*k):freq==='yearly'?addYears(it.date,k):addMonths(it.date,k);list.push({...base,date:d,status:(st==='pending'||d>today)?'pending':'paid',groupId:gid,recurrence:{freq,n:k+1,of:count}});}
+    }else list.push(base);
+    if(!auto&&it.sug&&it.sug!==it.category&&it.description)learnRule(it.description,it.category,it.type);
+  });
+  let created=[];
+  const ok=await safe(async()=>{created=await DB.addTx(list);});
+  if(!ok)return;
+  closeSheet();render();
+  toast(`${items.length} lançamento${items.length>1?'s':''} criado${items.length>1?'s':''} ✓`,'Desfazer',()=>safe(async()=>{await DB.delTx(created.map(x=>x.id));render();}));
+  hooks.afterSave.forEach(f=>{try{f(list);}catch(e){console.error(e);}});
+};
+/* =====================================================================
+   20. FOTO E PDF (melhorias): nota fiscal, contas de água/luz/internet/celular/gás, boletos e PDFs
+   ===================================================================== */
+const MAB2={jan:1,fev:2,mar:3,abr:4,mai:5,jun:6,jul:7,ago:8,set:9,out:10,nov:11,dez:12};
+const okd=r=>/^\d{4}-\d{2}-\d{2}$/.test(r)&&+r.slice(5,7)>=1&&+r.slice(5,7)<=12&&+r.slice(8)>=1&&+r.slice(8)<=31&&r>=addDays(todayStr(),-400)&&r<=addDays(todayStr(),500);
+function dateFrom(s){
+  s=String(s||'');let m=s.match(/\b(\d{2})[\/\-.](\d{2})[\/\-.](\d{4}|\d{2})\b/);
+  if(m){let y=+m[3];if(y<100)y+=2000;const r=`${y}-${m[2]}-${m[1]}`;if(okd(r))return r;}
+  m=norm(s).match(/\b(\d{1,2}) ?(?:de )?(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-z]* ?(?:de )?(\d{2,4})\b/);
+  if(m){let y=+m[3];if(y<100)y+=2000;const r=`${y}-${pad(MAB2[m[2]])}-${pad(+m[1])}`;if(okd(r))return r;}
+  return null;
+}
+const moneyIn=l=>[...String(l||'').matchAll(/(\d{1,3}(?:\.\d{3})+|\d+),(\d{2})(?!\d)/g)].map(m=>parseFloat(m[1].replace(/\./g,'')+'.'+m[2]));
+const SERVICES=[
+ ['luz','Luz',/\b(cemig|enel|cpfl|light|energisa|equatorial|neoenergia|celpe|coelba|cosern|elektro|copel|celesc|rge|eletropaulo|ceee|energia eletrica|kwh)\b/],
+ ['agua','Água',/\b(sabesp|copasa|sanepar|embasa|cedae|caesb|compesa|cagece|sanasa|saneago|casan|corsan|agua e esgoto|saneamento|consumo de agua|esgoto)\b/],
+ ['gas','Gás',/\b(comgas|naturgy|ultragaz|liquigas|supergasbras|gas natural|gas encanado)\b/],
+ ['internet','Internet',/\b(internet|fibra|banda larga|brisanet|algar|sercomtel|desktop|wi fi|net virtua)\b/],
+ ['celular','Celular',/\b(celular|plano movel|linha movel|pos pago|controle|vivo|claro|tim|oi movel|telefone)\b/]
+];
+const PROVIDERS=['Cemig','Enel','CPFL','Light','Energisa','Equatorial','Neoenergia','Celpe','Coelba','Cosern','Elektro','Copel','Celesc','RGE','Sabesp','Copasa','Sanepar','Embasa','Cedae','Caesb','Compesa','Cagece','Comgás','Naturgy','Ultragaz','Vivo','Claro','TIM','Oi','Brisanet','Algar','Sercomtel','Desktop'];
+function boletoInfo(d){ // valor e vencimento embutidos na linha digitável
+  if(d.length===47){
+    const fator=+d.slice(33,37),val=parseInt(d.slice(37,47),10)/100;let date=null;
+    if(fator){const t=todayStr(),a=fator>=1000?addDays('2025-02-22',fator-1000):null,b=addDays('1997-10-07',fator),ok=s=>s&&s>=addDays(t,-400)&&s<=addDays(t,500);date=ok(a)?a:ok(b)?b:null;}
+    return {amount:val>0?val:null,date};
+  }
+  if(d.length===48&&d[0]==='8'){
+    const b44=d.slice(0,11)+d.slice(12,23)+d.slice(24,35)+d.slice(36,47),amount=(b44[2]==='6'||b44[2]==='7')?parseInt(b44.slice(4,15),10)/100:null;
+    return {amount:amount>0?amount:null,date:null};
+  }
+  return null;
+}
+function enrichDoc(text,b){
+  const raw=String(text||''),n=norm(raw),lines=raw.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  const svc=SERVICES.find(s=>s[2].test(n));
+  const bill=/(vencimento|linha digitavel|codigo de barras|segunda via|kwh|leitura atual|debito automatico)/.test(n)||(!!svc&&/valor a pagar|total a pagar|fatura/.test(n));
+  const out={...b,kind:bill?'bill':'receipt',tags:[],note:'',status:''},notes=[];
+  const cnpj=(raw.match(/\b\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}\b/)||[])[0];
+  if(cnpj)notes.push('CNPJ '+cnpj);
+  if(!bill){
+    if(/nfc ?e|nf e|danfe|nota fiscal|cupom fiscal/.test(n))out.tags.push('nota-fiscal');
+    out.note=notes.join(' · ');return out;
+  }
+  // conta de consumo / boleto: valor a pagar, VENCIMENTO, linha digitável
+  out.type='expense';out.status='pending';
+  let amount=null;
+  for(const k of ['valor a pagar','total a pagar','valor do documento','valor total da fatura','total da fatura','valor cobrado','valor a ser pago','total do documento','valor da fatura']){
+    const i=lines.findIndex(l=>norm(l).includes(k));
+    if(i>=0){const a=moneyIn(lines[i]).concat(moneyIn(lines[i+1]||''));if(a.length){amount=a[0];break;}}
+  }
+  let due=null;
+  for(let i=0;i<lines.length&&!due;i++)if(/vencimento|vence |pagar ate|data limite/.test(norm(lines[i])))due=dateFrom(lines[i])||dateFrom(lines[i+1]||'');
+  const bar=lines.map(l=>l.replace(/\D/g,'')).find(d=>d.length===47||d.length===48),bol=bar?boletoInfo(bar):null;
+  if(amount==null&&bol&&bol.amount)amount=bol.amount;
+  if(!due&&bol&&bol.date)due=bol.date;
+  if(amount!=null)out.amount=amount;
+  if(due)out.date=due;
+  const prov=PROVIDERS.find(p=>new RegExp('\\b'+norm(p)+'\\b').test(n))||'';
+  const label=svc?svc[1].toLowerCase():'';
+  out.merchant=(label?`Conta de ${label}`:'Conta')+((prov||(!label&&b.merchant))?' — '+(prov||b.merchant):'');
+  out.payment=bar||/boleto|codigo de barras|linha digitavel/.test(n)?'Boleto':/debito automatico/.test(n)?'Débito':/\bpix\b/.test(n)?'Pix':'';
+  const pref=activeCats('expense').find(c=>/^(contas?( fixas?)?|utilidades|servicos)$/.test(norm(c)));
+  out.category=pref||(activeCats('expense').includes('Moradia')?'Moradia':b.category);
+  if(svc)out.tags.push(svc[0]);
+  const ref=n.match(/\b(?:referencia|competencia|mes ref)\D{0,12}(\d{2} ?\d{4}|[a-z]{3} ?\d{2,4})\b/);
+  if(ref)notes.push('Referência '+ref[1]);
+  if(bar)notes.push('Linha digitável: '+bar.replace(/(\d{5})(\d{5})(\d{5})(\d{6})(\d{5})(\d{6})(\d)(\d{14})/,'$1.$2 $3.$4 $5.$6 $7 $8'));
+  out.note=notes.join('\n');
+  return out;
+}
+const _parseReceiptB=parseReceipt;
+parseReceipt=function(text){return enrichDoc(text,_parseReceiptB(text));};
+
+// --- PDF (pdf.js via cdnjs): texto direto; se for escaneado, usa OCR na primeira página
+const PDFJS_V='3.11.174';let pdfP=null,pendingPdf=null;
+function ensurePdf(){
+  if(window.__pdfReady)return Promise.resolve(window.pdfjsLib);
+  if(!pdfP)pdfP=withTimeout(loadScript(`https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_V}/pdf.min.js`),20000).then(()=>{
+    const w=`https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_V}/pdf.worker.min.js`;
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc=URL.createObjectURL(new Blob([`importScripts("${w}");`],{type:'application/javascript'}));
+    window.__pdfReady=true;return window.pdfjsLib;
+  }).catch(e=>{pdfP=null;throw e;});
+  return pdfP;
+}
+async function pdfTextOf(pdf,maxPages){
+  let out='';
+  for(let p=1;p<=Math.min(pdf.numPages,maxPages);p++){
+    const page=await pdf.getPage(p),tc=await page.getTextContent(),rows=new Map();
+    tc.items.forEach(it=>{if(!it.str||!it.str.trim())return;const y=Math.round(it.transform[5]/3);let r=rows.get(y);if(!r){r=[];rows.set(y,r);}r.push({x:it.transform[4],s:it.str});});
+    [...rows.entries()].sort((a,b)=>b[0]-a[0]).forEach(([,r])=>{out+=r.sort((a,b)=>a.x-b.x).map(i=>i.s).join(' ')+'\n';});
+    out+='\n';
+  }
+  return out;
+}
+async function pdfRender(pdf,pageNo,maxSide){
+  const page=await pdf.getPage(pageNo),v0=page.getViewport({scale:1}),k=maxSide/Math.max(v0.width,v0.height),vp=page.getViewport({scale:k});
+  const c=document.createElement('canvas');c.width=Math.round(vp.width);c.height=Math.round(vp.height);
+  const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);
+  await page.render({canvasContext:x,viewport:vp}).promise;return c;
+}
+async function processPdf(file,password){
+  const show=h=>{const e=elx('ph-status');if(e)e.innerHTML=h;};
+  const step=(t,p)=>show(`<div class="small"><b>${esc(t)}</b></div><div class="bar" style="margin-top:8px"><i style="width:${p!=null?Math.round(p*100):35}%"></i></div>`);
+  const run=++VT.run,alive=()=>run===VT.run&&!!elx('ph-status');
+  step('Abrindo o PDF…');
+  let lib,pdf;
+  try{lib=await ensurePdf();}catch(e){console.warn(e);show('<div class="notice" role="alert">Não consegui carregar o leitor de PDF (sem internet?). Tente de novo ou fotografe a conta.</div>');return;}
+  try{pdf=await lib.getDocument({data:new Uint8Array(await file.arrayBuffer()),password}).promise;}
+  catch(e){
+    if(e&&e.name==='PasswordException'){
+      pendingPdf=file;
+      show(`<div class="notice"><b>${password?'Senha incorreta.':'Este PDF tem senha.'}</b><br>Muitas contas usam os primeiros dígitos do CPF.</div><div class="field" style="margin-top:8px"><input id="pdf-pass" class="input" type="password" placeholder="Senha do PDF" autocomplete="off" aria-label="Senha do PDF"></div><button class="btn primary block" data-action="pdf-pass">Abrir PDF</button>`);
+      return;
+    }
+    console.warn(e);show('<div class="notice" role="alert">Não consegui abrir este PDF. Ele pode estar corrompido. Tente fotografar a conta.</div>');return;
+  }
+  if(!alive())return;
+  step('Lendo o texto do PDF…');
+  let text='';try{text=await pdfTextOf(pdf,3);}catch(e){console.warn(e);}
+  let big=null;try{big=await pdfRender(pdf,1,1600);}catch(e){console.warn(e);}
+  if(!alive())return;
+  let result=null,reason=null;
+  if(text.replace(/\s/g,'').length<40){ // PDF escaneado: sem texto, usa OCR na primeira página
+    if(!big){show('<div class="notice">Não consegui ler este PDF. Tente fotografar a conta.</div>');return;}
+    const r=await readReceipt({canvas:big},(t,p)=>{if(alive())step(t,p);});result=r.result;reason=r.reason;
+  }else{
+    result=parseReceipt(text);reason=result.amount?null:'noamount';
+    if(!result.amount&&aiAvailable()&&big){const r=await readReceipt({canvas:big},()=>{});if(r.result&&r.result.amount){result=r.result;reason=null;}}
+  }
+  if(!alive())return;
+  const d=mkDraft(result,big?downscale(big,1000,.62):'',reason);
+  if(S().media.autoSave&&result&&result.amount&&result.kind!=='bill'){await savePhotoDraft(d,true);return;}
+  openPhotoConfirm(d);
+}
+const isPdfFile=f=>/pdf/i.test(f.type||'')||/\.pdf$/i.test(f.name||'');
+const _processPhotoB=processPhoto;
+processPhoto=function(file){return isPdfFile(file)?processPdf(file):_processPhotoB(file);};
+fieldHandlers.push((e,t)=>{if(e.type==='change'&&t.id==='ph-pdf'&&t.files&&t.files[0]){const f=t.files[0];t.value='';processPdf(f);}});
+actions['pdf-pass']=()=>{const pw=(elx('pdf-pass')||{}).value;if(pendingPdf&&pw)processPdf(pendingPdf,pw);};
+
+// --- tela de captura, conferência e salvamento (com situação, tags e observação)
+openPhotoSheet=function(){
+  if(S().media.photo===false){toast('A leitura de foto está desativada em Ajustes › Voz e foto.');return;}
+  openSheet(`<h3>📷 Lançar por foto ou PDF</h3>
+   <p class="muted small" style="margin-top:0">Leio notas e cupons fiscais, comprovantes de Pix e contas de água, luz, internet, celular e gás, em foto ou PDF. Você confere tudo antes de salvar.</p>
+   <div class="two"><label class="btn primary" for="ph-cam" style="cursor:pointer">📸 Tirar foto</label><label class="btn ghost" for="ph-gal" style="cursor:pointer">🖼️ Galeria</label></div>
+   <label class="btn ghost block" for="ph-pdf" style="cursor:pointer;margin-top:10px">📄 Escolher PDF da conta</label>
+   <input id="ph-cam" type="file" accept="image/*" capture="environment" class="hidden">
+   <input id="ph-gal" type="file" accept="image/*" class="hidden">
+   <input id="ph-pdf" type="file" accept="application/pdf,.pdf" class="hidden">
+   <div id="ph-status" style="margin-top:14px"></div>
+   <details class="more"><summary>O que eu leio?</summary><p class="muted small" style="line-height:1.6">• <b>Nota ou cupom fiscal:</b> valor, data, estabelecimento, CNPJ e forma de pagamento<br>• <b>Conta de luz, água, gás, internet e celular:</b> valor, <b>vencimento</b> e linha digitável do boleto (vai para a observação). Entra como <b>pendente</b>, com a data de vencimento<br>• <b>Comprovante de Pix ou transferência</b><br>• <b>PDF:</b> com texto, escaneado ou protegido por senha. A primeira página fica anexada ao lançamento</p></details>
+   <p class="muted small">${aiAvailable()?'Leitura por IA disponível neste ambiente, com OCR como plano B.':'A leitura é feita no próprio navegador (OCR e leitor de PDF): a imagem não sai do aparelho.'} Fotos de contas dão menos certeza que PDFs: confira o valor e o vencimento.</p>
+   <button class="btn ghost block" data-action="ph-manual">Preencher manualmente</button>`);
+};
+mkDraft=function(r,photo,reason){
+  const type=(r&&r.type)||'expense';
+  let cat=(r&&r.category)||suggestCategory((r&&r.merchant)||'',type);
+  if(!cat||!activeCats(type).includes(cat))cat=activeCats(type).includes('Outros')?'Outros':activeCats(type)[0];
+  return {photo,reason:reason||null,src:r?r.src:null,kind:(r&&r.kind)||'receipt',sug:cat,type,amount:r&&r.amount?r.amount:'',description:(r&&r.merchant)||'',category:cat,date:(r&&r.date)||todayStr(),payment:(r&&r.payment)||'',accountId:'',attach:!!photo,status:(r&&r.status)||'',tags:(r&&r.tags)||[],note:(r&&r.note)||''};
+};
+openPhotoConfirm=function(d){
+  pdraft=d;const accs=[...S().accounts,...S().cards],bill=d.kind==='bill';
+  openSheet(`<h3>${bill?'Confira a conta':'Confira o comprovante'}</h3>
+   ${d.photo?`<img class="thumb" src="${esc(d.photo)}" alt="Documento lido">`:''}
+   ${d.src?`<div class="ins ok"><span aria-hidden="true">✅</span><span>${d.src==='ia'?'Lido por IA':'Lido do documento'}${bill?'. É uma conta ou boleto: entra como pendente, com a data de vencimento':''}. Confira os campos antes de salvar.</span></div>`:`<div class="notice" role="alert">${esc(READ_MSG[d.reason]||'Não consegui ler automaticamente. Preencha os campos: a foto fica anexada.')}</div>`}
+   ${d.src&&!d.amount?`<div class="notice">${esc(READ_MSG.noamount)}</div>`:''}
+   <div class="field"><label for="pc-amount">Valor</label><input id="pc-amount" class="input big-in" inputmode="decimal" value="${d.amount?String(d.amount).replace('.',','):''}" ${d.amount?'':'autofocus'}></div>
+   <div class="field"><label for="pc-desc">${bill?'Conta / empresa':'Estabelecimento / descrição'}</label><input id="pc-desc" class="input" value="${esc(d.description)}"></div>
+   <div class="two"><div class="field"><label for="pc-type">Tipo</label><select id="pc-type" class="select">${[['expense','Despesa'],['income','Receita'],['investment','Investimento']].map(([v,l])=>`<option value="${v}" ${d.type===v?'selected':''}>${l}</option>`).join('')}</select></div>
+   <div class="field"><label for="pc-cat">Categoria</label><select id="pc-cat" class="select">${catOpts(d.type,d.category)}</select></div></div>
+   <div class="two"><div class="field"><label for="pc-date">${bill?'Vencimento':'Data'}</label><input id="pc-date" class="input" type="date" value="${esc(d.date)}"></div>
+   <div class="field"><label for="pc-status">Situação</label><select id="pc-status" class="select"><option value="" ${!d.status?'selected':''}>Automática (pela data)</option><option value="paid" ${d.status==='paid'?'selected':''}>Paga</option><option value="pending" ${d.status==='pending'?'selected':''}>Pendente</option></select></div></div>
+   <div class="two"><div class="field"><label for="pc-pay">Forma de pagamento</label><select id="pc-pay" class="select">${PAYS.map(p=>`<option value="${p}" ${d.payment===p?'selected':''}>${p||'—'}</option>`).join('')}</select></div>
+   ${accs.length?`<div class="field"><label for="pc-acc">Conta / cartão</label><select id="pc-acc" class="select"><option value="">—</option>${accs.map(a=>`<option value="${esc(a.id)}" ${d.accountId===a.id?'selected':''}>${a.limit!=null?'💳':'🏦'} ${esc(a.name)}</option>`).join('')}</select></div>`:'<div></div>'}</div>
+   <details class="more" ${(d.tags&&d.tags.length)||d.note?'open':''}><summary>Mais: tags e observação</summary>
+    <div class="field"><label for="pc-tags">Tags</label><input id="pc-tags" class="input" placeholder="luz, casa" value="${esc((d.tags||[]).join(', '))}"></div>
+    <div class="field"><label for="pc-note">Observação</label><textarea id="pc-note" class="textarea" rows="3">${esc(d.note||'')}</textarea></div></details>
+   ${d.photo?`<label class="trow"><span><b>Anexar o documento ao lançamento</b><small>Guardado de forma reduzida, na sua conta</small></span><input id="pc-attach" type="checkbox" class="sw" ${d.attach?'checked':''}></label>`:''}
+   <p id="pc-err" class="err" role="alert"></p>
+   <div class="two"><button class="btn ghost" data-action="ph-again">📷 Outro documento</button><button class="btn ghost" data-sheet-x="0">Cancelar</button></div>
+   <div class="sheet-foot"><button class="btn primary block" data-action="ph-save">Salvar lançamento</button></div>`);
+};
+collectPhoto=function(){
+  const g=id=>elx(id);if(!pdraft||!g('pc-type'))return;
+  Object.assign(pdraft,{type:g('pc-type').value,amount:parseMoney(g('pc-amount').value),description:g('pc-desc').value.trim(),category:g('pc-cat').value,date:g('pc-date').value,payment:g('pc-pay').value,accountId:g('pc-acc')?g('pc-acc').value:'',status:g('pc-status').value,tags:parseTags(g('pc-tags').value),note:g('pc-note').value.trim(),attach:g('pc-attach')?!!g('pc-attach').checked:false});
+};
+savePhotoDraft=async function(d,auto){
+  const base={userId:state.user.uid,date:d.date,type:d.type,category:d.category,amount:d.amount,description:d.description||d.category,status:d.status||(d.date>todayStr()?'pending':'paid'),payment:d.payment||undefined,accountId:d.accountId||undefined,tags:d.tags||[],note:d.note||undefined,via:d.kind==='bill'?'conta':'foto',createdAt:new Date().toISOString()};
+  if(!auto&&d.sug&&d.sug!==d.category&&d.description)learnRule(d.description,d.category,d.type);
+  let created=null;
+  if(!await safe(async()=>{created=(await DB.addTx([base]))[0];}))return;
+  let attached=false,msg='';
+  if(d.attach&&d.photo){
+    try{await RC.save(created.id,d.photo);await DB.updTx(created.id,{hasReceipt:true});attached=true;}
+    catch(e){console.error(e);msg=e.code==='permission-denied'?'Lançamento salvo, mas o documento não foi anexado: falta publicar a regra "receipts" no Firestore (Ajustes › Sobre e ajuda).':'Lançamento salvo, mas o documento não foi anexado. Edite o lançamento para anexar depois.';}
+  }
+  closeSheet();render();
+  toast(msg||`Lançamento salvo${attached?' com anexo 📎':''} ✓`,'Desfazer',()=>safe(async()=>{await DB.delTx([created.id]);if(attached)await RC.del(created.id);render();}));
+  hooks.afterSave.forEach(f=>{try{f([base]);}catch(e){console.error(e);}});
+};
+/* =====================================================================
+   21. ACESSO: tela de login fora do app, sair pelo perfil e senha confidencial
+   ===================================================================== */
+const OWNER_EMAIL='netozael@gmail.com'; // só pré-preenche o campo de e-mail. A SENHA NUNCA fica no código.
+const ALLOW_SIGNUP=true;                // depois de criar sua conta, troque para false (e desative o cadastro no Firebase)
+const _authHtmlD=authHtml;
+authHtml=function(mode){
+  let h=_authHtmlD(ALLOW_SIGNUP?mode:'login');
+  if(!ALLOW_SIGNUP)h=h.replace(/<div class="seg">.*?<\/div>/s,'');
+  return h;
+};
+// Acesso local (quando o Firebase não carrega, ex.: pré-visualização): senha guardada só como assinatura PBKDF2
+const LA={
+  get:()=>store.get('pf_local_auth',null),
+  async hash(pass,saltHex){
+    const salt=new Uint8Array(saltHex.match(/../g).map(h=>parseInt(h,16)));
+    const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(pass),'PBKDF2',false,['deriveBits']);
+    const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:150000,hash:'SHA-256'},key,256);
+    return [...new Uint8Array(bits)].map(b=>b.toString(16).padStart(2,'0')).join('');
+  },
+  async create(email,pass){
+    const sh=[...crypto.getRandomValues(new Uint8Array(16))].map(b=>b.toString(16).padStart(2,'0')).join('');
+    store.set('pf_local_auth',{email,salt:sh,hash:await this.hash(pass,sh)});
+  },
+  async check(pass){const a=this.get();return !!a&&(await this.hash(pass,a.salt))===a.hash;}
+};
+function localAuthHtml(){
+  const acc=LA.get();
+  return `<div class="login-card">
+   <div class="logo"><b>P</b></div><h1 class="brandname">Plann-<i>C</i></h1>
+   <p class="muted">${acc?'Entre para abrir o seu planejamento':'Crie o seu acesso para começar'}</p>
+   <div class="notice" style="margin-bottom:14px">Acesso local: a senha tranca o app neste navegador. Para proteção de verdade e uso em vários aparelhos, publique o site com o Firebase.</div>
+   <form id="auth-form" novalidate>
+    <div class="field"><label for="au-email">E-mail</label><input id="au-email" class="input" type="email" autocomplete="email" placeholder="voce@email.com"></div>
+    <div class="field"><label for="au-pass">Senha</label><div class="searchbar"><input id="au-pass" class="input" type="password" autocomplete="${acc?'current-password':'new-password'}" placeholder="${acc?'Sua senha':'Mínimo 6 caracteres'}"><button type="button" class="icon-btn" data-auth="toggle" aria-label="Mostrar ou ocultar senha">👁</button></div></div>
+    ${acc?'':`<div class="field"><label for="au-pass2">Repita a senha</label><input id="au-pass2" class="input" type="password" autocomplete="new-password"></div>`}
+    <p id="au-msg" class="msg" role="alert"></p>
+    <button class="btn primary block" type="submit">${acc?'Entrar':'Criar meu acesso'}</button>
+   </form>
+   ${acc?`<p class="center" style="margin:14px 0 0"><button type="button" class="btn ghost" data-auth="reset">Esqueci minha senha</button></p>`:''}
+   <p class="muted small center" style="margin:16px 0 0">🔒 A senha não é guardada em texto: fica só uma assinatura criptografada.</p></div>`;
+}
+async function localAuthSubmit(){
+  const email=$('#au-email').value.trim().toLowerCase(),pass=$('#au-pass').value,acc=LA.get();
+  if(!email||!pass){authMsg('Preencha e-mail e senha.');return;}
+  try{
+    if(!acc){
+      if(pass.length<6){authMsg('A senha precisa ter pelo menos 6 caracteres.');return;}
+      if(pass!==$('#au-pass2').value){authMsg('As senhas não coincidem.');return;}
+      authMsg('Criando o seu acesso…',true);await LA.create(email,pass);
+    }else{
+      authMsg('Entrando…',true);
+      if(email!==acc.email||!(await LA.check(pass))){await new Promise(r=>setTimeout(r,700));authMsg('E-mail ou senha incorretos.');return;}
+    }
+    state.user={uid:'local',email};authMsg('');await enterApp();
+  }catch(e){console.error(e);authMsg('Não foi possível validar a senha neste navegador.');}
+}
+const _authSubmitD=authSubmit;
+authSubmit=function(){return state.gate==='local'?localAuthSubmit():_authSubmitD();};
+const _authResetD=authReset;
+authReset=async function(){
+  if(state.gate!=='local')return _authResetD();
+  if(!await confirmSheet('Esqueci minha senha','Neste modo local não dá para recuperar a senha. Para recomeçar é preciso apagar os dados deste navegador (lançamentos, metas e configurações). No site publicado com Firebase, a senha é redefinida por e-mail.','Apagar tudo e recomeçar',true))return;
+  try{Object.keys(localStorage).filter(k=>k.startsWith('pf_local_')||k.startsWith('pf_rc_')).forEach(k=>localStorage.removeItem(k));}catch{}
+  ['pf_local_auth','pf_local_data'].forEach(k=>store.del(k));
+  state.settings=defSettings();showLogin();
+};
+const _showLoginD=showLogin;
+showLogin=function(){
+  authMode='login';
+  $('#login').innerHTML=state.gate==='local'?localAuthHtml():authHtml('login');
+  _showLoginD();
+  const em=$('#au-email');if(em&&!em.value)em.value=(state.gate==='local'&&LA.get())?LA.get().email:OWNER_EMAIL;
+};
+boot=async function(){
+  applyTheme();buildShell();
+  const localGate=()=>{
+    state.mode='local';
+    if(!(window.crypto&&crypto.subtle)){state.user={uid:'local',email:''};enterApp();return;}
+    state.gate='local';state.user=null;showLogin();
+  };
+  try{
+    if(!(await initFirebase())){localGate();return;}
+    state.mode='firebase';
+    A.onAuthStateChanged(fb.auth,async u=>{
+      if(u){state.user=u;await enterApp();}
+      else{state.user=null;state.tx=[];state.goals=[];state.settings=defSettings();showLogin();}
+    });
+  }catch(e){console.error(e);localGate();}
+};
+actions['quick-logout']=async()=>{
+  if(state.mode==='firebase'){if(await confirmSheet('Sair do Plann-C','Você precisará entrar novamente neste aparelho.','Sair'))await A.signOut(fb.auth);return;}
+  if(await confirmSheet('Sair do Plann-C','Você precisará digitar a senha para entrar de novo.','Sair')){closeSheet();state.user=null;state.tx=[];state.goals=[];state.settings=defSettings();showLogin();}
+};
+actions['go-login']=()=>actions['quick-logout']();
+hooks.afterLoad.push(()=>{const s=$('#side-out');if(s)s.textContent='Sair';});
+const _topbarD=topbar;
+topbar=function(t,s,w=true){return _topbarD(t,s,w).replace('data-action="go-login" aria-label="Entrar ou criar conta" title="Entrar">🔐','data-action="quick-logout" aria-label="Sair" title="Sair">🚪');};
+const _settingsHomeD=settingsHome;
+settingsHome=function(){
+  return _settingsHomeD().replace('<button class="btn primary block" data-action="go-login" style="margin-top:6px">🔐 Entrar ou criar conta</button><p class="muted small center">Modo local: seus dados ficam só neste navegador.</p>','<button class="btn danger block" data-action="quick-logout" style="margin-top:6px">🚪 Sair</button><p class="muted small center">Acesso local: seus dados ficam só neste navegador.</p>');
+};
+const _pageProfileD=pageProfile;
+pageProfile=function(){
+  return _pageProfileD()+`<div class="card cardx"><h3>Sessão</h3><p class="muted small" style="margin-top:0">${state.user&&state.user.email?esc(state.user.email):'Acesso local'}</p><button class="btn danger block" data-action="quick-logout">🚪 Sair da conta</button></div>`;
+};
+
+/* =====================================================================
+   22. LEITURA POR IA (quando disponível) e teste de contas, boletos e PDF
+   ===================================================================== */
+normalizeRead=function(o,src){
+  if(!o||typeof o!=='object')return null;
+  const bill=o.kind==='bill';
+  let amount=typeof o.amount==='string'?parseMoney(o.amount):Number(o.amount);
+  if(!(amount>0)||amount>1e7)amount=null;
+  let date=/^\d{4}-\d{2}-\d{2}$/.test(String(o.date||''))?o.date:null;
+  if(date&&(date<addYears(todayStr(),-3)||date>addDays(todayStr(),bill?500:1)))date=null;
+  const type=o.type==='income'?'income':'expense',service=['luz','agua','gas','internet','celular'].includes(o.service)?o.service:null;
+  const pref=activeCats('expense').find(c=>/^(contas?( fixas?)?|utilidades|servicos)$/.test(norm(c)));
+  let category=activeCats(type).includes(o.category)?o.category:null;
+  if(bill&&service)category=pref||(activeCats('expense').includes('Moradia')?'Moradia':category);
+  const notes=[];if(o.reference)notes.push('Referência '+String(o.reference).slice(0,20));if(o.barcode)notes.push('Linha digitável: '+String(o.barcode).slice(0,60));
+  return {amount,date,merchant:o.merchant?String(o.merchant).trim().slice(0,60):'',payment:PAYS.includes(o.payment)?o.payment:(bill&&o.barcode?'Boleto':''),type,category,src,kind:bill?'bill':'receipt',status:bill?'pending':'',tags:service?[service]:[],note:notes.join('\n')};
+};
+aiRead=async function(dataUrl){
+  const ctrl=new AbortController(),tm=setTimeout(()=>ctrl.abort(),25000);
+  try{
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},signal:ctrl.signal,body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,messages:[{role:'user',content:[
+      {type:'image',source:{type:'base64',media_type:'image/jpeg',data:dataUrl.split(',')[1]}},
+      {type:'text',text:`Leia este documento brasileiro (nota ou cupom fiscal, comprovante de Pix, conta de água, luz, internet, celular ou gás, ou boleto) e responda SOMENTE com JSON, sem markdown: {"kind":"receipt" ou "bill","amount":número ou null,"date":"AAAA-MM-DD" (em conta ou boleto use o VENCIMENTO; em comprovante use a data da compra) ou null,"merchant":"estabelecimento, favorecido ou empresa" ou null,"service":"luz|agua|gas|internet|celular|outro" ou null,"payment":"Pix|Débito|Crédito|Dinheiro|Boleto|Transferência" ou null,"type":"expense ou income","category":"uma de: ${activeCats('expense').join(', ')}" ou null,"barcode":"linha digitável se houver" ou null,"reference":"mês de referência se houver" ou null}. Hoje é ${todayStr()}.`}]}]})});
+    if(!r.ok)throw new Error('http '+r.status);
+    const j=await r.json(),txt=(j.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
+    return normalizeRead(JSON.parse(txt.replace(/```json|```/g,'').trim()),'ia');
+  }finally{clearTimeout(tm);}
+};
+async function runDocsTest(){
+  const rows=[],add=(ok,t,m,h)=>rows.push(`<li><span class="st">${ok?'✅':'❌'}</span><span><b>${esc(t)}</b><small>${esc(m)}</small>${h?`<small>👉 ${esc(h)}</small>`:''}</span></li>`);
+  const dueD=addDays(todayStr(),9),dueBR=dueD.split('-').reverse().join('/'),todayBR=todayStr().split('-').reverse().join('/');
+  const luz=parseReceipt(`CEMIG DISTRIBUICAO S.A.\nCONTA DE ENERGIA ELETRICA\nCONSUMO 210 kWh\nVENCIMENTO ${dueBR}\nTOTAL A PAGAR R$ 187,43`),p1=[];
+  if(luz.kind!=='bill')p1.push('tipo conta');if(Math.abs((luz.amount||0)-187.43)>.01)p1.push('valor');if(luz.date!==dueD)p1.push('vencimento');if(!/cemig/i.test(luz.merchant))p1.push('empresa');if(luz.status!=='pending')p1.push('situação');
+  add(!p1.length,'Conta de luz (exemplo)',p1.length?'Não identifiquei: '+p1.join(', '):`Valor ${nf.format(luz.amount)}, vencimento ${fmtDate(luz.date)}, ${luz.merchant}, pendente.`);
+  const fator=1000+diffDays('2025-02-22',dueD),L=('23791'+'23456'+'78901'+'234567'+'89012'+'345678'+'9'+String(fator).padStart(4,'0')+'0000012990');
+  const bol=parseReceipt(`CONTA DE INTERNET\nBRISANET\nLINHA DIGITAVEL\n${L.slice(0,5)}.${L.slice(5,10)} ${L.slice(10,15)}.${L.slice(15,21)} ${L.slice(21,26)}.${L.slice(26,32)} ${L[32]} ${L.slice(33)}`),p2=[];
+  if(bol.kind!=='bill')p2.push('tipo conta');if(Math.abs((bol.amount||0)-129.9)>.01)p2.push('valor da linha digitável');if(bol.date!==dueD)p2.push('vencimento da linha digitável');if(bol.payment!=='Boleto')p2.push('pagamento');if(!/Linha digit/.test(bol.note||''))p2.push('observação');
+  add(!p2.length,'Boleto com linha digitável (exemplo)',p2.length?'Não identifiquei: '+p2.join(', '):`Valor ${nf.format(bol.amount)} e vencimento ${fmtDate(bol.date)} lidos da própria linha digitável.`);
+  const nfc=parseReceipt(`SUPERMERCADO BOM PRECO LTDA\nCNPJ 12.345.678/0001-90\nNFC-e NOTA FISCAL DE CONSUMIDOR ELETRONICA\nEmissao: ${todayBR} 14:32\nQTD TOTAL DE ITENS 6\nVALOR TOTAL R$ 88,40\nFORMA DE PAGAMENTO\nCartao de Debito 88,40`),p3=[];
+  if(nfc.kind!=='receipt')p3.push('tipo');if(Math.abs((nfc.amount||0)-88.4)>.01)p3.push('valor');if(nfc.payment!=='Débito')p3.push('pagamento');if(!/CNPJ/.test(nfc.note||''))p3.push('CNPJ');if(!nfc.tags.includes('nota-fiscal'))p3.push('tag nota-fiscal');
+  add(!p3.length,'Nota fiscal (exemplo)',p3.length?'Não identifiquei: '+p3.join(', '):`Valor ${nf.format(nfc.amount)}, ${nfc.merchant}, pagamento ${nfc.payment}, ${nfc.note}.`);
+  try{await ensurePdf();add(true,'Leitor de PDF','pdf.js carregado. PDFs com texto são lidos direto; escaneados passam pelo OCR; protegidos por senha pedem a senha.');}
+  catch(e){add(false,'Leitor de PDF','Não consegui carregar o pdf.js.','Conecte-se à internet e repita o teste.');}
+  const el=elx('vt-list');if(!el)return;
+  el.insertAdjacentHTML('afterend',`<h3 style="margin:18px 0 10px;font-size:16px">Contas, boletos e PDF</h3><ul class="steps">${rows.join('')}</ul>`);
+}
+const _runPhotoTestD=runPhotoTest;
+runPhotoTest=async function(){await _runPhotoTestD();try{await runDocsTest();}catch(e){console.error(e);}};
 boot();
 </script>
 </body>
